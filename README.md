@@ -104,6 +104,66 @@ No transactions or mainnet support; read-only plus key generation.
 
 ---
 
+This service uses a **single HD wallet** (hierarchical deterministic wallet) based on a **BIP-39 mnemonic** to manage many Solana addresses.
+
+### Core Idea
+
+* **One mnemonic (seed phrase)** is the root of all wallet accounts.
+* From this mnemonic, the service deterministically derives many **Ed25519 keypairs** (Solana accounts) using a **BIP-44 Solana path**, e.g.:
+
+  * `m/44'/501'/0'/0'/index`
+* Each derived keypair has:
+
+  * A **unique public key** (Solana address)
+  * A **label** (human-readable name, e.g. `treasury`, `hot-wallet-1`, `customer-123`)
+
+### Startup Flow
+
+On application start:
+
+1. **Read mnemonic** from a secure source (env/secret manager).
+2. Convert the mnemonic to a root seed.
+3. Load the list of known accounts from persistent storage (e.g. DB), each record containing:
+
+   * `label` (name/owner)
+   * derivation data (`accountNumber`, `index`, etc.)
+   * cached `publicKey` (optional but recommended)
+4. For each record, the service can:
+
+   * derive the keypair immediately and cache it, or
+   * derive it lazily on first use (from mnemonic + derivation path).
+
+### Address Creation
+
+When a new address is needed:
+
+* The service selects the next free **index** under a chosen account path (e.g. `m/44'/501'/0'/0'/N`).
+* It derives the new keypair from the mnemonic and that index.
+* It stores a metadata record:
+
+  * `label` (who/what this address is for)
+  * derivation path parameters (e.g. `accountNumber`, `index`)
+  * `publicKey` (base58 address)
+* Only the **mnemonic** must be stored securely; individual private keys do not need to be persisted separately.
+
+### Using Addresses
+
+* **Getting balances**
+
+  * Uses only the **public key**; no private key required.
+  * The service can look up an address by label or by public key and call the Solana RPC balance API.
+
+* **Signing transactions**
+
+  * The service looks up the account’s derivation data (by label or public key).
+  * Derives the corresponding keypair from the mnemonic.
+  * Uses that keypair to sign transactions (e.g. sends SOL, interacts with programs).
+
+This approach lets the program **control many addresses** from a single root mnemonic, while keeping the design deterministic, recoverable, and label-friendly.
+
+
+---
+
 ## 7. Configuration & Error Handling
 
 **Configuration:**
