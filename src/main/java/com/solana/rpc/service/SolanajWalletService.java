@@ -57,10 +57,13 @@ public class SolanajWalletService implements SolanaWalletService {
     }
 
     private static RpcClient createDefaultClient() {
-        String rpcUrl = System.getenv("SOLANA_RPC_URL");
+        ServiceConfiguration configuration = ConfigLoader.loadConfiguration();
+
+        String rpcUrl = configuration.getSolanaRpcUrl();
         if (rpcUrl != null && !rpcUrl.isBlank()) {
             return new RpcClient(rpcUrl);
         }
+
         return new RpcClient(Cluster.TESTNET);
     }
 }
