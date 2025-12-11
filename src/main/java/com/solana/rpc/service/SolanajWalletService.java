@@ -19,18 +19,29 @@ public class SolanajWalletService implements SolanaWalletService {
     private static final BigDecimal LAMPORTS_PER_SOL = new BigDecimal("1000000000");
 
     private final RpcClient rpcClient;
+    private final KeyStorage keyStorage;
 
     public SolanajWalletService() {
-        this(createDefaultClient());
+        this(createDefaultClient(), new InMemoryKeyStorage());
     }
 
     public SolanajWalletService(RpcClient rpcClient) {
+        this(rpcClient, new InMemoryKeyStorage());
+    }
+
+    public SolanajWalletService(RpcClient rpcClient, KeyStorage keyStorage) {
         this.rpcClient = Objects.requireNonNull(rpcClient, "rpcClient must not be null");
+        this.keyStorage = Objects.requireNonNull(keyStorage, "keyStorage must not be null");
     }
 
     @Override
     public String getNewAddress() {
         Account account = new Account();
+        try {
+            keyStorage.save(account);
+        } catch (RuntimeException e) {
+            throw new IllegalStateException("Failed to persist generated keypair", e);
+        }
         return account.getPublicKey().toBase58();
     }
 
