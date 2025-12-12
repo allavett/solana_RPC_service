@@ -1,6 +1,8 @@
 package com.solana.rpc.service;
 
 import com.solana.rpc.config.SolanaApplicationContext;
+import com.solana.rpc.model.DerivedAccount;
+import com.solana.rpc.wallet.DerivationService;
 import org.p2p.solanaj.core.Account;
 import org.p2p.solanaj.core.PublicKey;
 import org.p2p.solanaj.rpc.RpcApi;
@@ -9,40 +11,56 @@ import org.p2p.solanaj.rpc.RpcException;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.Collections;
+import java.util.List;
 import java.util.Objects;
 
 /**
- * Default implementation of {@link SolanaWalletService} backed by the Solanaj RPC client.
+ * Default implementation of {@link SolanaWalletService} backed by the Solanaj RPC client and deterministic key derivation.
  */
 public class SolanajWalletService implements SolanaWalletService {
 
     private static final BigDecimal LAMPORTS_PER_SOL = new BigDecimal("1000000000");
+    private static final int DEFAULT_ACCOUNT = 0;
+    private static final int DEFAULT_CHANGE = 0;
 
     private final RpcClient rpcClient;
-    private final KeyStorage keyStorage;
+    private final DerivationService derivationService;
+    private final DerivedAccountRepository accountRepository;
 
     public SolanajWalletService() {
-        this(SolanaApplicationContext.getRpcClient(), new InMemoryKeyStorage());
+        this(SolanaApplicationContext.getRpcClient(),
+                new DerivationService(SolanaApplicationContext.getConfig().getMnemonic()),
+                new InMemoryDerivedAccountRepository());
     }
 
-    public SolanajWalletService(RpcClient rpcClient) {
-        this(rpcClient, new InMemoryKeyStorage());
-    }
-
-    public SolanajWalletService(RpcClient rpcClient, KeyStorage keyStorage) {
+    public SolanajWalletService(RpcClient rpcClient, DerivationService derivationService,
+                                DerivedAccountRepository accountRepository) {
         this.rpcClient = Objects.requireNonNull(rpcClient, "rpcClient must not be null");
-        this.keyStorage = Objects.requireNonNull(keyStorage, "keyStorage must not be null");
+        this.derivationService = Objects.requireNonNull(derivationService, "derivationService must not be null");
+        this.accountRepository = Objects.requireNonNull(accountRepository, "accountRepository must not be null");
     }
 
     @Override
-    public String getNewAddress() {
-        Account account = new Account();
-        try {
-            keyStorage.save(account);
-        } catch (RuntimeException e) {
-            throw new IllegalStateException("Failed to persist generated keypair", e);
+    public List<DerivedAccount> listAccounts() {
+        return Collections.unmodifiableList(accountRepository.findAll());
+    }
+
+    @Override
+    public String getNewAddress(String label) {
+        validateLabel(label);
+        if (accountRepository.findByLabel(label).isPresent()) {
+            throw new IllegalArgumentException("Label already exists: " + label);
         }
-        return account.getPublicKey().toBase58();
+
+        int nextIndex = determineNextIndex();
+        Account derivedAccount = derivationService.derive(DEFAULT_ACCOUNT, DEFAULT_CHANGE, nextIndex);
+        String publicKey = derivedAccount.getPublicKey().toBase58();
+
+        DerivedAccount metadata = new DerivedAccount(label, DEFAULT_ACCOUNT, DEFAULT_CHANGE, nextIndex, publicKey);
+        accountRepository.save(metadata);
+
+        return publicKey;
     }
 
     @Override
@@ -65,5 +83,27 @@ public class SolanajWalletService implements SolanaWalletService {
         } catch (RpcException e) {
             throw new IllegalStateException("Failed to fetch balance from Solana RPC", e);
         }
+    }
+
+    @Override
+    public BigDecimal getBalanceByLabel(String label) {
+        validateLabel(label);
+        DerivedAccount account = accountRepository.findByLabel(label)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown account label: " + label));
+        return getBalance(account.getPublicKey());
+    }
+
+    private void validateLabel(String label) {
+        if (label == null || label.isBlank()) {
+            throw new IllegalArgumentException("Label must not be null or blank");
+        }
+    }
+
+    private int determineNextIndex() {
+        return accountRepository.findAll().stream()
+                .filter(account -> account.getAccount() == DEFAULT_ACCOUNT && account.getChange() == DEFAULT_CHANGE)
+                .mapToInt(DerivedAccount::getIndex)
+                .max()
+                .orElse(-1) + 1;
     }
 }
