@@ -1,3 +1,7 @@
 {
-  "SolanaRpcUrl": "https://api.testnet.solana.com"
+  "Mnemonic": "test walk nut penalty hip pave soap entry language right filter choice",
+  "SolanaRpcUrl": "https://api.testnet.solana.com",
+  "ReadTimeoutMs": 20000,
+  "ConnectTimeoutMs": 10000,
+  "WriteTimeoutMs": 20000
 }
