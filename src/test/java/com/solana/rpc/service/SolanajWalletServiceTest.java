@@ -26,6 +26,7 @@ class SolanajWalletServiceTest {
     private SolanajWalletService walletService;
     private DerivationService derivationService;
     private DerivedAccountRepository accountRepository;
+    private InMemoryKeyStorage keyStorage;
 
     @Mock
     private RpcClient rpcClient;
@@ -39,7 +40,8 @@ class SolanajWalletServiceTest {
         when(rpcClient.getApi()).thenReturn(rpcApi);
         derivationService = new DerivationService(TEST_MNEMONIC);
         accountRepository = new InMemoryDerivedAccountRepository();
-        walletService = new SolanajWalletService(rpcClient, derivationService, accountRepository);
+        keyStorage = new InMemoryKeyStorage();
+        walletService = new SolanajWalletService(rpcClient, derivationService, accountRepository, keyStorage);
     }
 
     @Test
@@ -58,6 +60,17 @@ class SolanajWalletServiceTest {
 
         List<DerivedAccount> accounts = walletService.listAccounts();
         assertEquals(2, accounts.size());
+        assertEquals(2, keyStorage.getAccounts().size());
+    }
+
+    @Test
+    void getNewAddressWithoutLabelAutoGeneratesLabel() {
+        String address = walletService.getNewAddress();
+
+        DerivedAccount account = accountRepository.findByLabel("account-0").orElseThrow();
+        assertEquals(address, account.getPublicKey());
+        assertEquals(0, account.getIndex());
+        assertEquals(1, keyStorage.getAccounts().size());
     }
 
     @Test

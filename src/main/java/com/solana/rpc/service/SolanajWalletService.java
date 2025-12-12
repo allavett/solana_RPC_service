@@ -27,23 +27,33 @@ public class SolanajWalletService implements SolanaWalletService {
     private final RpcClient rpcClient;
     private final DerivationService derivationService;
     private final DerivedAccountRepository accountRepository;
+    private final KeyStorage keyStorage;
 
     public SolanajWalletService() {
         this(SolanaApplicationContext.getRpcClient(),
                 new DerivationService(SolanaApplicationContext.getConfig().getMnemonic()),
-                new InMemoryDerivedAccountRepository());
+                new InMemoryDerivedAccountRepository(),
+                new InMemoryKeyStorage());
     }
 
     public SolanajWalletService(RpcClient rpcClient, DerivationService derivationService,
-                                DerivedAccountRepository accountRepository) {
+                                DerivedAccountRepository accountRepository, KeyStorage keyStorage) {
         this.rpcClient = Objects.requireNonNull(rpcClient, "rpcClient must not be null");
         this.derivationService = Objects.requireNonNull(derivationService, "derivationService must not be null");
         this.accountRepository = Objects.requireNonNull(accountRepository, "accountRepository must not be null");
+        this.keyStorage = Objects.requireNonNull(keyStorage, "keyStorage must not be null");
     }
 
     @Override
     public List<DerivedAccount> listAccounts() {
         return Collections.unmodifiableList(accountRepository.findAll());
+    }
+
+    @Override
+    public String getNewAddress() {
+        int nextIndex = determineNextIndex();
+        String autoLabel = "account-" + nextIndex;
+        return createAndPersistAddress(autoLabel, nextIndex);
     }
 
     @Override
@@ -54,13 +64,7 @@ public class SolanajWalletService implements SolanaWalletService {
         }
 
         int nextIndex = determineNextIndex();
-        Account derivedAccount = derivationService.derive(DEFAULT_ACCOUNT, DEFAULT_CHANGE, nextIndex);
-        String publicKey = derivedAccount.getPublicKey().toBase58();
-
-        DerivedAccount metadata = new DerivedAccount(label, DEFAULT_ACCOUNT, DEFAULT_CHANGE, nextIndex, publicKey);
-        accountRepository.save(metadata);
-
-        return publicKey;
+        return createAndPersistAddress(label, nextIndex);
     }
 
     @Override
@@ -105,5 +109,16 @@ public class SolanajWalletService implements SolanaWalletService {
                 .mapToInt(DerivedAccount::getIndex)
                 .max()
                 .orElse(-1) + 1;
+    }
+
+    private String createAndPersistAddress(String label, int index) {
+        Account derivedAccount = derivationService.derive(DEFAULT_ACCOUNT, DEFAULT_CHANGE, index);
+        keyStorage.save(derivedAccount);
+        String publicKey = derivedAccount.getPublicKey().toBase58();
+
+        DerivedAccount metadata = new DerivedAccount(label, DEFAULT_ACCOUNT, DEFAULT_CHANGE, index, publicKey);
+        accountRepository.save(metadata);
+
+        return publicKey;
     }
 }

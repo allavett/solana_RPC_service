@@ -53,6 +53,7 @@ public class SolanaConfig {
             if (configuration == null) {
                 throw new IllegalStateException("config.json is empty; mnemonic is required for startup");
             }
+            configuration.applyEnvironmentOverrides();
             configuration.validate();
             return configuration;
         } catch (IOException e) {
@@ -68,6 +69,34 @@ public class SolanaConfig {
 
     public String getMnemonic() {
         return mnemonic;
+    }
+
+    private void applyEnvironmentOverrides() {
+        mnemonic = overrideIfPresent(mnemonic, "SOLANA_MNEMONIC");
+        solanaRpcUrl = overrideIfPresent(solanaRpcUrl, "SOLANA_RPC_URL");
+        readTimeoutMs = overrideIfPresent(readTimeoutMs, "SOLANA_READ_TIMEOUT_MS");
+        connectTimeoutMs = overrideIfPresent(connectTimeoutMs, "SOLANA_CONNECT_TIMEOUT_MS");
+        writeTimeoutMs = overrideIfPresent(writeTimeoutMs, "SOLANA_WRITE_TIMEOUT_MS");
+    }
+
+    private static String overrideIfPresent(String currentValue, String envKey) {
+        String override = System.getenv(envKey);
+        if (override != null && !override.isBlank()) {
+            return override;
+        }
+        return currentValue;
+    }
+
+    private static int overrideIfPresent(int currentValue, String envKey) {
+        String override = System.getenv(envKey);
+        if (override == null || override.isBlank()) {
+            return currentValue;
+        }
+        try {
+            return Integer.parseInt(override.trim());
+        } catch (NumberFormatException e) {
+            throw new IllegalStateException("Environment variable " + envKey + " must be a valid integer", e);
+        }
     }
 
     public String getSolanaRpcUrl() {

@@ -32,6 +32,7 @@ class SolanajWalletServiceIntegrationTest {
     private RpcApi rpcApi;
 
     private InMemoryDerivedAccountRepository repository;
+    private InMemoryKeyStorage keyStorage;
     private SolanajWalletService walletService;
 
     @BeforeEach
@@ -39,7 +40,8 @@ class SolanajWalletServiceIntegrationTest {
         MockitoAnnotations.openMocks(this);
         when(rpcClient.getApi()).thenReturn(rpcApi);
         repository = new InMemoryDerivedAccountRepository();
-        walletService = new SolanajWalletService(rpcClient, new DerivationService(TEST_MNEMONIC), repository);
+        keyStorage = new InMemoryKeyStorage();
+        walletService = new SolanajWalletService(rpcClient, new DerivationService(TEST_MNEMONIC), repository, keyStorage);
     }
 
     @Test

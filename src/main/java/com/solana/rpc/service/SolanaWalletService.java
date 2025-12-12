@@ -23,6 +23,15 @@ public interface SolanaWalletService {
      *
      * @return base58-encoded public address string
      */
+    String getNewAddress();
+
+    /**
+     * Generates a new Solana testnet address using the provided label and persists the associated
+     * derivation metadata.
+     *
+     * @param label human-readable label for the new address
+     * @return base58-encoded public address string
+     */
     String getNewAddress(String label);
 
     /**
