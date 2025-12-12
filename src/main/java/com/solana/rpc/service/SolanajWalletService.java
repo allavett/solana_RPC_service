@@ -1,8 +1,8 @@
 package com.solana.rpc.service;
 
+import com.solana.rpc.config.SolanaApplicationContext;
 import org.p2p.solanaj.core.Account;
 import org.p2p.solanaj.core.PublicKey;
-import org.p2p.solanaj.rpc.Cluster;
 import org.p2p.solanaj.rpc.RpcApi;
 import org.p2p.solanaj.rpc.RpcClient;
 import org.p2p.solanaj.rpc.RpcException;
@@ -22,7 +22,7 @@ public class SolanajWalletService implements SolanaWalletService {
     private final KeyStorage keyStorage;
 
     public SolanajWalletService() {
-        this(createDefaultClient(), new InMemoryKeyStorage());
+        this(SolanaApplicationContext.getRpcClient(), new InMemoryKeyStorage());
     }
 
     public SolanajWalletService(RpcClient rpcClient) {
@@ -65,16 +65,5 @@ public class SolanajWalletService implements SolanaWalletService {
         } catch (RpcException e) {
             throw new IllegalStateException("Failed to fetch balance from Solana RPC", e);
         }
-    }
-
-    private static RpcClient createDefaultClient() {
-        ServiceConfiguration configuration = ConfigLoader.loadConfiguration();
-
-        String rpcUrl = configuration.getSolanaRpcUrl();
-        if (rpcUrl != null && !rpcUrl.isBlank()) {
-            return new RpcClient(rpcUrl);
-        }
-
-        return new RpcClient(Cluster.TESTNET);
     }
 }
