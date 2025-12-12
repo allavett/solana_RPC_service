@@ -170,6 +170,15 @@ This approach lets the program **control many addresses** from a single root mne
 
 * RPC URL, timeouts, and retries supplied via config (env vars, properties, etc.).
 * Ability to switch between default testnet endpoint and a custom testnet RPC URL.
+* Default configuration lives in `src/main/resources/config.json` with the following parameters:
+
+  * `Mnemonic` – the BIP-39 seed phrase used to derive all wallet accounts. Example value is seeded for local testing only.
+  * `SolanaRpcUrl` – testnet RPC endpoint URL (defaults to `https://api.testnet.solana.com`).
+  * `ReadTimeoutMs` – read timeout in milliseconds for RPC calls.
+  * `ConnectTimeoutMs` – connection timeout in milliseconds for RPC calls.
+  * `WriteTimeoutMs` – write timeout in milliseconds for RPC calls.
+
+  Override these values via environment variables or application properties as needed for your deployment.
 
 **Error handling:**
 
