@@ -88,7 +88,23 @@ class SolanajWalletServiceTest {
     }
 
     @Test
+    void getBalanceRejectsInvalidBase58() {
+        assertThrows(IllegalArgumentException.class, () -> walletService.getBalance("not-base58"));
+    }
+
+    @Test
     void getBalanceByLabelRejectsUnknownLabel() {
         assertThrows(IllegalArgumentException.class, () -> walletService.getBalanceByLabel("missing"));
+    }
+
+    @Test
+    void getBalanceByLabelRejectsBlankLabel() {
+        assertThrows(IllegalArgumentException.class, () -> walletService.getBalanceByLabel(" "));
+    }
+
+    @Test
+    void getNewAddressRejectsMissingLabel() {
+        assertThrows(IllegalArgumentException.class, () -> walletService.getNewAddress(null));
+        assertThrows(IllegalArgumentException.class, () -> walletService.getNewAddress(""));
     }
 }
