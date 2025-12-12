@@ -28,6 +28,17 @@ class DerivationServiceTest {
     }
 
     @Test
+    void derivationIsDeterministicForMnemonic() {
+        DerivationService firstInstance = new DerivationService(TEST_MNEMONIC);
+        DerivationService secondInstance = new DerivationService(TEST_MNEMONIC);
+
+        String firstDerived = firstInstance.derivePublicKeyBase58(0, 0, 5);
+        String secondDerived = secondInstance.derivePublicKeyBase58(0, 0, 5);
+
+        assertEquals(firstDerived, secondDerived);
+    }
+
+    @Test
     void validatesMnemonicInput() {
         assertThrows(NullPointerException.class, () -> new DerivationService(null));
         assertThrows(IllegalArgumentException.class, () -> new DerivationService("   "));
