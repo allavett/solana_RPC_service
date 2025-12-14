@@ -15,7 +15,6 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -38,7 +37,7 @@ import java.util.stream.Collectors;
         System.out.println("=== Solana Testnet Wallet Demo ===");
         System.out.println("RPC endpoint: " + SolanaApplicationContext.getConfig().getSolanaRpcUrl());
 
-        String label = "demo-" + Instant.now().toEpochMilli();
+        final String label = "demo";
         System.out.println("\nCreating a new derived address with label: " + label);
 
         String address = walletService.getNewAddress(label);
