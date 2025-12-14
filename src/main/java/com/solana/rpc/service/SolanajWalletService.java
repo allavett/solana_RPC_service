@@ -14,12 +14,15 @@ import java.math.RoundingMode;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Default implementation of {@link SolanaWalletService} backed by the Solanaj RPC client and deterministic key derivation.
  */
 public class SolanajWalletService implements SolanaWalletService {
 
+    private static final Logger LOGGER = Logger.getLogger(SolanajWalletService.class.getName());
     private static final BigDecimal LAMPORTS_PER_SOL = new BigDecimal("1000000000");
     private static final int DEFAULT_ACCOUNT = 0;
     private static final int DEFAULT_CHANGE = 0;
@@ -34,6 +37,12 @@ public class SolanajWalletService implements SolanaWalletService {
                 new DerivationService(SolanaApplicationContext.getConfig().getMnemonic()),
                 new InMemoryDerivedAccountRepository(),
                 new InMemoryKeyStorage());
+
+        LOGGER.info(() -> "Initialized SolanajWalletService with RPC URL="
+                + SolanaApplicationContext.getConfig().getSolanaRpcUrl()
+                + " (connectTimeoutMs=" + SolanaApplicationContext.getConfig().getConnectTimeoutMs()
+                + ", readTimeoutMs=" + SolanaApplicationContext.getConfig().getReadTimeoutMs()
+                + ", writeTimeoutMs=" + SolanaApplicationContext.getConfig().getWriteTimeoutMs() + ")");
     }
 
     public SolanajWalletService(RpcClient rpcClient, DerivationService derivationService,
@@ -82,9 +91,13 @@ public class SolanajWalletService implements SolanaWalletService {
 
         try {
             RpcApi api = rpcClient.getApi();
+            LOGGER.info(() -> "Requesting balance from RPC for address " + base58Address
+                    + " via endpoint " + SolanaApplicationContext.getConfig().getSolanaRpcUrl());
             long lamports = api.getBalance(publicKey);
+            LOGGER.info(() -> "Received balance (lamports): " + lamports);
             return BigDecimal.valueOf(lamports).divide(LAMPORTS_PER_SOL, 9, RoundingMode.DOWN);
         } catch (RpcException e) {
+            LOGGER.log(Level.SEVERE, "RPC balance call failed", e);
             throw new IllegalStateException("Failed to fetch balance from Solana RPC", e);
         }
     }
