@@ -5,6 +5,8 @@ import com.solana.rpc.model.DerivedAccount;
 import com.solana.rpc.wallet.DerivationService;
 import org.p2p.solanaj.core.Account;
 import org.p2p.solanaj.core.PublicKey;
+import org.p2p.solanaj.core.Transaction;
+import org.p2p.solanaj.programs.SystemProgram;
 import org.p2p.solanaj.rpc.RpcApi;
 import org.p2p.solanaj.rpc.RpcClient;
 import org.p2p.solanaj.rpc.RpcException;
@@ -108,6 +110,72 @@ public class SolanajWalletService implements SolanaWalletService {
         DerivedAccount account = accountRepository.findByLabel(label)
                 .orElseThrow(() -> new IllegalArgumentException("Unknown account label: " + label));
         return getBalance(account.getPublicKey());
+    }
+
+    @Override
+    public String transferSol(String fromAddress, String toAddress, BigDecimal amount) {
+        if (fromAddress == null || fromAddress.isBlank()) {
+            throw new IllegalArgumentException("Sender address must not be null or blank");
+        }
+        if (toAddress == null || toAddress.isBlank()) {
+            throw new IllegalArgumentException("Recipient address must not be null or blank");
+        }
+        if (amount == null) {
+            throw new IllegalArgumentException("Amount must not be null");
+        }
+        if (amount.signum() <= 0) {
+            throw new IllegalArgumentException("Amount must be greater than zero");
+        }
+
+        BigDecimal normalizedAmount = amount.stripTrailingZeros();
+        if (normalizedAmount.scale() > 9) {
+            throw new IllegalArgumentException("Amount must not have more than 9 decimal places");
+        }
+
+        final PublicKey fromPublicKey;
+        final PublicKey toPublicKey;
+        try {
+            fromPublicKey = new PublicKey(fromAddress);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Sender address is not a valid base58-encoded public key", e);
+        }
+        try {
+            toPublicKey = new PublicKey(toAddress);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Recipient address is not a valid base58-encoded public key", e);
+        }
+
+        DerivedAccount derivedAccount = accountRepository.findByPublicKey(fromAddress)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown derived address: " + fromAddress));
+
+        Account sender = derivationService.derive(
+                derivedAccount.getAccount(),
+                derivedAccount.getChange(),
+                derivedAccount.getIndex());
+
+        BigDecimal lamportsDecimal = amount.multiply(LAMPORTS_PER_SOL);
+        final long lamports;
+        try {
+            lamports = lamportsDecimal.setScale(0, RoundingMode.UNNECESSARY).longValueExact();
+        } catch (ArithmeticException e) {
+            throw new IllegalArgumentException("Amount must be convertible to lamports without rounding", e);
+        }
+        if (lamports <= 0) {
+            throw new IllegalArgumentException("Amount must be greater than zero");
+        }
+
+        Transaction transaction = new Transaction();
+        transaction.addInstruction(SystemProgram.transfer(fromPublicKey, toPublicKey, lamports));
+
+        try {
+            RpcApi api = rpcClient.getApi();
+            LOGGER.info(() -> "Submitting SOL transfer from " + fromAddress + " to " + toAddress
+                    + " for " + amount + " SOL (" + lamports + " lamports).");
+            return api.sendTransaction(transaction, sender);
+        } catch (RpcException e) {
+            LOGGER.log(Level.SEVERE, "RPC transfer call failed", e);
+            throw new IllegalStateException("Failed to transfer SOL via Solana RPC", e);
+        }
     }
 
     private void validateLabel(String label) {

@@ -49,4 +49,14 @@ public interface SolanaWalletService {
      * @return balance in SOL with up to nine fractional digits
      */
     BigDecimal getBalanceByLabel(String label);
+
+    /**
+     * Transfers SOL from a derived account to a target address.
+     *
+     * @param fromAddress base58-encoded sender public key derived from the configured mnemonic
+     * @param toAddress base58-encoded recipient public key
+     * @param amount amount in SOL to transfer
+     * @return transaction signature in base58 format
+     */
+    String transferSol(String fromAddress, String toAddress, BigDecimal amount);
 }
