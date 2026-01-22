@@ -237,38 +237,3 @@ This approach lets the program **control many addresses** from a single root mne
 
   * Generate an address and confirm that balance calls succeed.
   * Query the balance of known funded testnet addresses, if available.
-
----
-
-## 9. Steps to add `transferSol` (SOL transfer)
-
-### README improvement
-
-1. Add `transferSol(fromAddress, toAddress, amount)` to the Public Interface section, describing inputs, behavior, outputs, and failure cases.
-2. Document validation rules for addresses and amount, plus the lamports conversion.
-3. Note that sender keys must be derived from the configured mnemonic and metadata storage.
-
-### Code implementation
-
-1. Extend the service interface/class (e.g., `SolanaWalletService`) with `transferSol(fromAddress, toAddress, amount)`.
-2. Add validation utilities for addresses and amount (non-empty, valid base58 public keys, positive amount).
-3. Resolve sender derivation metadata and derive the keypair from the mnemonic (fail fast if missing).
-4. Convert SOL to lamports using a safe decimal-to-long conversion (guard against overflow/precision loss).
-5. Build and sign a `SystemProgram.transfer` transaction in Solanaj.
-6. Submit the signed transaction to the RPC client and return the transaction signature.
-7. Add structured error handling for validation failures, missing sender metadata, insufficient funds, and RPC errors.
-
-### Tests
-
-1. Unit tests with mocked RPC client:
-
-   * Valid transfer returns a signature.
-   * Invalid sender or recipient address returns validation errors.
-   * Invalid amount (zero/negative/too many decimals) returns validation errors.
-   * Missing sender metadata returns a not-found error.
-2. RPC failure handling:
-
-   * Simulate RPC errors/timeouts and verify error mapping.
-3. (Optional) Integration tests on testnet:
-
-   * Use funded testnet account to send a small amount and verify signature is returned.
