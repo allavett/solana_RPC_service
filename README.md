@@ -78,6 +78,32 @@ No transactions or mainnet support; read-only plus key generation.
 
 ---
 
+### 4.3 `transferSol(fromAddress, toAddress, amount)`
+
+* **Input:**
+
+  * `fromAddress` – base58-encoded sender public key (must be derived from the configured mnemonic).
+  * `toAddress` – base58-encoded recipient public key.
+  * `amount` – SOL amount to transfer (decimal, up to 9 fractional digits).
+* **Behavior:**
+
+  * Validates both addresses and amount (positive, non-zero).
+  * Derives the sender keypair from the mnemonic and stored derivation metadata.
+  * Converts SOL to lamports (1 SOL = 1,000,000,000 lamports).
+  * Builds and signs a SOL transfer transaction.
+  * Submits the transaction to the testnet RPC and returns the signature.
+* **Output:**
+
+  * Transaction signature (base58 string).
+* **Failure cases:**
+
+  * Invalid sender/recipient address or amount.
+  * Missing derivation metadata for sender address.
+  * RPC/network errors (report as RPC error).
+  * Insufficient funds.
+
+---
+
 ## 5. Solana Integration
 
 * Service talks only to **testnet**.
@@ -211,4 +237,3 @@ This approach lets the program **control many addresses** from a single root mne
 
   * Generate an address and confirm that balance calls succeed.
   * Query the balance of known funded testnet addresses, if available.
-
