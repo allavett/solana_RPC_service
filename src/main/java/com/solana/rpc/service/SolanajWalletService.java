@@ -114,36 +114,9 @@ public class SolanajWalletService implements SolanaWalletService {
 
     @Override
     public String transferSol(String fromAddress, String toAddress, BigDecimal amount) {
-        if (fromAddress == null || fromAddress.isBlank()) {
-            throw new IllegalArgumentException("Sender address must not be null or blank");
-        }
-        if (toAddress == null || toAddress.isBlank()) {
-            throw new IllegalArgumentException("Recipient address must not be null or blank");
-        }
-        if (amount == null) {
-            throw new IllegalArgumentException("Amount must not be null");
-        }
-        if (amount.signum() <= 0) {
-            throw new IllegalArgumentException("Amount must be greater than zero");
-        }
-
-        BigDecimal normalizedAmount = amount.stripTrailingZeros();
-        if (normalizedAmount.scale() > 9) {
-            throw new IllegalArgumentException("Amount must not have more than 9 decimal places");
-        }
-
-        final PublicKey fromPublicKey;
-        final PublicKey toPublicKey;
-        try {
-            fromPublicKey = new PublicKey(fromAddress);
-        } catch (IllegalArgumentException e) {
-            throw new IllegalArgumentException("Sender address is not a valid base58-encoded public key", e);
-        }
-        try {
-            toPublicKey = new PublicKey(toAddress);
-        } catch (IllegalArgumentException e) {
-            throw new IllegalArgumentException("Recipient address is not a valid base58-encoded public key", e);
-        }
+        PublicKey fromPublicKey = parseRequiredPublicKey(fromAddress, "Sender");
+        PublicKey toPublicKey = parseRequiredPublicKey(toAddress, "Recipient");
+        long lamports = validateAndConvertAmount(amount);
 
         DerivedAccount derivedAccount = accountRepository.findByPublicKey(fromAddress)
                 .orElseThrow(() -> new IllegalArgumentException("Unknown derived address: " + fromAddress));
@@ -152,17 +125,6 @@ public class SolanajWalletService implements SolanaWalletService {
                 derivedAccount.getAccount(),
                 derivedAccount.getChange(),
                 derivedAccount.getIndex());
-
-        BigDecimal lamportsDecimal = amount.multiply(LAMPORTS_PER_SOL);
-        final long lamports;
-        try {
-            lamports = lamportsDecimal.setScale(0, RoundingMode.UNNECESSARY).longValueExact();
-        } catch (ArithmeticException e) {
-            throw new IllegalArgumentException("Amount must be convertible to lamports without rounding", e);
-        }
-        if (lamports <= 0) {
-            throw new IllegalArgumentException("Amount must be greater than zero");
-        }
 
         Transaction transaction = new Transaction();
         transaction.addInstruction(SystemProgram.transfer(fromPublicKey, toPublicKey, lamports));
@@ -181,6 +143,38 @@ public class SolanajWalletService implements SolanaWalletService {
     private void validateLabel(String label) {
         if (label == null || label.isBlank()) {
             throw new IllegalArgumentException("Label must not be null or blank");
+        }
+    }
+
+    private PublicKey parseRequiredPublicKey(String address, String label) {
+        if (address == null || address.isBlank()) {
+            throw new IllegalArgumentException(label + " address must not be null or blank");
+        }
+        try {
+            return new PublicKey(address);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(label + " address is not a valid base58-encoded public key", e);
+        }
+    }
+
+    private long validateAndConvertAmount(BigDecimal amount) {
+        if (amount == null) {
+            throw new IllegalArgumentException("Amount must not be null");
+        }
+        if (amount.signum() <= 0) {
+            throw new IllegalArgumentException("Amount must be greater than zero");
+        }
+
+        BigDecimal normalizedAmount = amount.stripTrailingZeros();
+        if (normalizedAmount.scale() > 9) {
+            throw new IllegalArgumentException("Amount must not have more than 9 decimal places");
+        }
+
+        BigDecimal lamportsDecimal = amount.multiply(LAMPORTS_PER_SOL);
+        try {
+            return lamportsDecimal.setScale(0, RoundingMode.UNNECESSARY).longValueExact();
+        } catch (ArithmeticException e) {
+            throw new IllegalArgumentException("Amount must be convertible to lamports without rounding", e);
         }
     }
 

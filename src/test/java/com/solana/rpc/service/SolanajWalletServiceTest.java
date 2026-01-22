@@ -6,7 +6,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
+import org.p2p.solanaj.core.Account;
 import org.p2p.solanaj.core.PublicKey;
+import org.p2p.solanaj.core.Transaction;
 import org.p2p.solanaj.rpc.RpcApi;
 import org.p2p.solanaj.rpc.RpcClient;
 import org.p2p.solanaj.rpc.RpcException;
@@ -119,5 +121,55 @@ class SolanajWalletServiceTest {
     void getNewAddressRejectsMissingLabel() {
         assertThrows(IllegalArgumentException.class, () -> walletService.getNewAddress(null));
         assertThrows(IllegalArgumentException.class, () -> walletService.getNewAddress(""));
+    }
+
+    @Test
+    void transferSolSubmitsTransactionForDerivedAccount() throws RpcException {
+        String sender = walletService.getNewAddress("sender");
+        when(rpcApi.sendTransaction(any(Transaction.class), any(Account.class))).thenReturn("signature");
+
+        String signature = walletService.transferSol(sender, "11111111111111111111111111111111", new BigDecimal("1.5"));
+
+        assertEquals("signature", signature);
+        verify(rpcApi).sendTransaction(any(Transaction.class), any(Account.class));
+    }
+
+    @Test
+    void transferSolRejectsUnknownSender() {
+        assertThrows(IllegalArgumentException.class, () -> walletService.transferSol(
+                "11111111111111111111111111111111",
+                "9LCBeEKbr17HV3Us8cWR7JrnNP6tLK6QDFtMv8RevjP1",
+                new BigDecimal("1")));
+    }
+
+    @Test
+    void transferSolRejectsInvalidAddresses() {
+        assertThrows(IllegalArgumentException.class, () -> walletService.transferSol(
+                "not-base58",
+                "11111111111111111111111111111111",
+                new BigDecimal("1")));
+        String sender = walletService.getNewAddress("valid-sender");
+        assertThrows(IllegalArgumentException.class, () -> walletService.transferSol(
+                sender,
+                "not-base58",
+                new BigDecimal("1")));
+    }
+
+    @Test
+    void transferSolRejectsInvalidAmount() {
+        String sender = walletService.getNewAddress("amount-sender");
+
+        assertThrows(IllegalArgumentException.class, () -> walletService.transferSol(
+                sender,
+                "11111111111111111111111111111111",
+                new BigDecimal("-1")));
+        assertThrows(IllegalArgumentException.class, () -> walletService.transferSol(
+                sender,
+                "11111111111111111111111111111111",
+                new BigDecimal("0")));
+        assertThrows(IllegalArgumentException.class, () -> walletService.transferSol(
+                sender,
+                "11111111111111111111111111111111",
+                new BigDecimal("0.0000000001")));
     }
 }
