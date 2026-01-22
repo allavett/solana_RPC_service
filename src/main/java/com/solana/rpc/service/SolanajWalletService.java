@@ -5,6 +5,8 @@ import com.solana.rpc.model.DerivedAccount;
 import com.solana.rpc.wallet.DerivationService;
 import org.p2p.solanaj.core.Account;
 import org.p2p.solanaj.core.PublicKey;
+import org.p2p.solanaj.core.Transaction;
+import org.p2p.solanaj.programs.SystemProgram;
 import org.p2p.solanaj.rpc.RpcApi;
 import org.p2p.solanaj.rpc.RpcClient;
 import org.p2p.solanaj.rpc.RpcException;
@@ -110,9 +112,69 @@ public class SolanajWalletService implements SolanaWalletService {
         return getBalance(account.getPublicKey());
     }
 
+    @Override
+    public String transferSol(String fromAddress, String toAddress, BigDecimal amount) {
+        PublicKey fromPublicKey = parseRequiredPublicKey(fromAddress, "Sender");
+        PublicKey toPublicKey = parseRequiredPublicKey(toAddress, "Recipient");
+        long lamports = validateAndConvertAmount(amount);
+
+        DerivedAccount derivedAccount = accountRepository.findByPublicKey(fromAddress)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown derived address: " + fromAddress));
+
+        Account sender = derivationService.derive(
+                derivedAccount.getAccount(),
+                derivedAccount.getChange(),
+                derivedAccount.getIndex());
+
+        Transaction transaction = new Transaction();
+        transaction.addInstruction(SystemProgram.transfer(fromPublicKey, toPublicKey, lamports));
+
+        try {
+            RpcApi api = rpcClient.getApi();
+            LOGGER.info(() -> "Submitting SOL transfer from " + fromAddress + " to " + toAddress
+                    + " for " + amount + " SOL (" + lamports + " lamports).");
+            return api.sendTransaction(transaction, sender);
+        } catch (RpcException e) {
+            LOGGER.log(Level.SEVERE, "RPC transfer call failed", e);
+            throw new IllegalStateException("Failed to transfer SOL via Solana RPC", e);
+        }
+    }
+
     private void validateLabel(String label) {
         if (label == null || label.isBlank()) {
             throw new IllegalArgumentException("Label must not be null or blank");
+        }
+    }
+
+    private PublicKey parseRequiredPublicKey(String address, String label) {
+        if (address == null || address.isBlank()) {
+            throw new IllegalArgumentException(label + " address must not be null or blank");
+        }
+        try {
+            return new PublicKey(address);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(label + " address is not a valid base58-encoded public key", e);
+        }
+    }
+
+    private long validateAndConvertAmount(BigDecimal amount) {
+        if (amount == null) {
+            throw new IllegalArgumentException("Amount must not be null");
+        }
+        if (amount.signum() <= 0) {
+            throw new IllegalArgumentException("Amount must be greater than zero");
+        }
+
+        BigDecimal normalizedAmount = amount.stripTrailingZeros();
+        if (normalizedAmount.scale() > 9) {
+            throw new IllegalArgumentException("Amount must not have more than 9 decimal places");
+        }
+
+        BigDecimal lamportsDecimal = amount.multiply(LAMPORTS_PER_SOL);
+        try {
+            return lamportsDecimal.setScale(0, RoundingMode.UNNECESSARY).longValueExact();
+        } catch (ArithmeticException e) {
+            throw new IllegalArgumentException("Amount must be convertible to lamports without rounding", e);
         }
     }
 
