@@ -43,8 +43,25 @@ import java.util.stream.Collectors;
         String address = walletService.getNewAddress(label);
         System.out.println("New address: " + address);
 
+        String transferDemoAddress = walletService.getNewAddress("demoTransfer");
+        System.out.println("Transfer demo address: " + transferDemoAddress);
+
+        String transactionRecipient = walletService.getNewAddress("demoTransaction");
+        System.out.println("Transaction recipient address: " + transactionRecipient);
+
         BigDecimal balance = walletService.getBalance(address);
         System.out.println("Balance for " + address + ": " + balance.stripTrailingZeros().toPlainString() + " SOL");
+
+        BigDecimal transferAmount = new BigDecimal("0.001");
+        if (balance.compareTo(transferAmount) >= 0) {
+            System.out.println("\nSubmitting transfer of " + transferAmount.stripTrailingZeros().toPlainString()
+                    + " SOL from " + label + " to demoTransaction...");
+            String signature = walletService.transferSol(address, transactionRecipient, transferAmount);
+            System.out.println("Transfer signature: " + signature);
+        } else {
+            System.out.println("\nSkipping transfer; insufficient balance to send "
+                    + transferAmount.stripTrailingZeros().toPlainString() + " SOL.");
+        }
 
         List<DerivedAccount> accounts = walletService.listAccounts();
         System.out.println("\nDerived accounts held in memory:");
