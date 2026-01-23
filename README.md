@@ -104,6 +104,29 @@ No transactions or mainnet support; read-only plus key generation.
 
 ---
 
+### 4.4 `getTokenBalance(base58Address, tokenMintAddress)`
+
+* **Input:**
+
+  * `base58Address` – string, base58-encoded Solana public key (token account owner).
+  * `tokenMintAddress` – string, base58-encoded SPL token mint address.
+* **Behavior:**
+
+  * Validates that both addresses are non-empty and structurally valid as Solana public keys.
+  * Queries the Solana RPC for the token account(s) owned by `base58Address` for the given mint.
+  * Reads the token balance from the matching token account and normalizes using the mint decimals.
+* **Output:**
+
+  * Balance as a decimal number in **token units** with up to the mint’s decimal precision.
+* **Failure cases:**
+
+  * Invalid owner or mint address input (report as validation error).
+  * Token account not found for the given owner/mint pair.
+  * RPC/network errors (report as RPC error).
+  * Unexpected internal errors (wrapped and logged).
+
+---
+
 ## 5. Solana Integration
 
 * Service talks only to **testnet**.
