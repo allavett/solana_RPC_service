@@ -42,9 +42,7 @@ import java.util.stream.Collectors;
 
         String address = walletService.getNewAddress(label);
         System.out.println("New address: " + address);
-
-        String transferDemoAddress = address;
-        System.out.println("Transfer demo address: " + transferDemoAddress);
+        System.out.println("Transfer demo address: " + address);
 
         String transactionRecipient = walletService.getNewAddress("demoTransaction");
         System.out.println("Transaction recipient address: " + transactionRecipient);
