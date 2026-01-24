@@ -59,4 +59,13 @@ public interface SolanaWalletService {
      * @return transaction signature in base58 format
      */
     String transferSol(String fromAddress, String toAddress, BigDecimal amount);
+
+    /**
+     * Retrieves the SPL token balance for the provided owner address and token mint.
+     *
+     * @param base58Address base58-encoded owner public key
+     * @param tokenMintAddress base58-encoded SPL token mint address
+     * @return token balance in token units with mint decimals applied
+     */
+    BigDecimal getTokenBalance(String base58Address, String tokenMintAddress);
 }
