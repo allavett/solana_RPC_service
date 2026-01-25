@@ -10,11 +10,14 @@ import org.p2p.solanaj.programs.SystemProgram;
 import org.p2p.solanaj.rpc.RpcApi;
 import org.p2p.solanaj.rpc.RpcClient;
 import org.p2p.solanaj.rpc.RpcException;
+import org.p2p.solanaj.rpc.types.TokenAccountInfo;
+import org.p2p.solanaj.rpc.types.TokenResultObjects;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -140,6 +143,34 @@ public class SolanajWalletService implements SolanaWalletService {
         }
     }
 
+    @Override
+    public BigDecimal getTokenBalance(String base58Address, String tokenMintAddress) {
+        PublicKey ownerPublicKey = parseRequiredPublicKey(base58Address, "Owner");
+        PublicKey mintPublicKey = parseRequiredPublicKey(tokenMintAddress, "Token mint");
+
+        try {
+            RpcApi api = rpcClient.getApi();
+            LOGGER.info(() -> "Requesting token balance for owner " + base58Address
+                    + " and mint " + tokenMintAddress + " via endpoint "
+                    + SolanaApplicationContext.getConfig().getSolanaRpcUrl());
+            Map<String, Object> filter = Map.of("mint", mintPublicKey.toBase58());
+            Map<String, Object> config = Map.of("encoding", "jsonParsed");
+            TokenAccountInfo tokenAccounts = api.getTokenAccountsByOwner(ownerPublicKey, filter, config);
+
+            if (tokenAccounts == null || tokenAccounts.getValue() == null || tokenAccounts.getValue().isEmpty()) {
+                throw new IllegalArgumentException("No token account found for owner and mint");
+            }
+
+            TokenAccountInfo.Value accountValue = tokenAccounts.getValue().get(0);
+            BigDecimal balance = extractTokenBalance(accountValue);
+            LOGGER.info(() -> "Received token balance: " + balance);
+            return balance;
+        } catch (RpcException e) {
+            LOGGER.log(Level.SEVERE, "RPC token balance call failed", e);
+            throw new IllegalStateException("Failed to fetch token balance from Solana RPC", e);
+        }
+    }
+
     private void validateLabel(String label) {
         if (label == null || label.isBlank()) {
             throw new IllegalArgumentException("Label must not be null or blank");
@@ -155,6 +186,37 @@ public class SolanajWalletService implements SolanaWalletService {
         } catch (IllegalArgumentException e) {
             throw new IllegalArgumentException(label + " address is not a valid base58-encoded public key", e);
         }
+    }
+
+    private BigDecimal extractTokenBalance(TokenAccountInfo.Value accountValue) {
+        if (accountValue == null) {
+            throw new IllegalArgumentException("Token account details are missing");
+        }
+
+        TokenResultObjects.Value value = accountValue.getAccount();
+        if (value == null || value.getData() == null || value.getData().getParsed() == null
+                || value.getData().getParsed().getInfo() == null
+                || value.getData().getParsed().getInfo().getTokenAmount() == null) {
+            throw new IllegalStateException("Token account data is incomplete");
+        }
+
+        TokenResultObjects.TokenAmountInfo tokenAmount = value.getData().getParsed().getInfo().getTokenAmount();
+        String uiAmountString = tokenAmount.getUiAmountString();
+        if (uiAmountString != null && !uiAmountString.isBlank()) {
+            return new BigDecimal(uiAmountString);
+        }
+
+        String rawAmount = tokenAmount.getAmount();
+        if (rawAmount != null && !rawAmount.isBlank()) {
+            return new BigDecimal(rawAmount).movePointLeft(tokenAmount.getDecimals());
+        }
+
+        Double uiAmount = tokenAmount.getUiAmount();
+        if (uiAmount != null) {
+            return BigDecimal.valueOf(uiAmount);
+        }
+
+        throw new IllegalStateException("Token amount details are missing");
     }
 
     private long validateAndConvertAmount(BigDecimal amount) {

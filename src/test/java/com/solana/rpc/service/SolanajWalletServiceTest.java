@@ -12,12 +12,15 @@ import org.p2p.solanaj.core.Transaction;
 import org.p2p.solanaj.rpc.RpcApi;
 import org.p2p.solanaj.rpc.RpcClient;
 import org.p2p.solanaj.rpc.RpcException;
+import org.p2p.solanaj.rpc.types.TokenAccountInfo;
+import org.p2p.solanaj.rpc.types.TokenResultObjects;
 
 import java.math.BigDecimal;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -115,6 +118,59 @@ class SolanajWalletServiceTest {
     @Test
     void getBalanceByLabelRejectsBlankLabel() {
         assertThrows(IllegalArgumentException.class, () -> walletService.getBalanceByLabel(" "));
+    }
+
+    @Test
+    void getTokenBalanceReturnsConvertedTokenBalance() throws RpcException {
+        TokenAccountInfo tokenAccountInfo = org.mockito.Mockito.mock(TokenAccountInfo.class);
+        TokenAccountInfo.Value value = org.mockito.Mockito.mock(TokenAccountInfo.Value.class);
+        TokenResultObjects.Value accountValue = org.mockito.Mockito.mock(TokenResultObjects.Value.class);
+        TokenResultObjects.Data data = org.mockito.Mockito.mock(TokenResultObjects.Data.class);
+        TokenResultObjects.ParsedData parsedData = org.mockito.Mockito.mock(TokenResultObjects.ParsedData.class);
+        TokenResultObjects.TokenInfo tokenInfo = org.mockito.Mockito.mock(TokenResultObjects.TokenInfo.class);
+        TokenResultObjects.TokenAmountInfo tokenAmount = org.mockito.Mockito.mock(TokenResultObjects.TokenAmountInfo.class);
+
+        when(tokenAccountInfo.getValue()).thenReturn(List.of(value));
+        when(value.getAccount()).thenReturn(accountValue);
+        when(accountValue.getData()).thenReturn(data);
+        when(data.getParsed()).thenReturn(parsedData);
+        when(parsedData.getInfo()).thenReturn(tokenInfo);
+        when(tokenInfo.getTokenAmount()).thenReturn(tokenAmount);
+        when(tokenAmount.getUiAmountString()).thenReturn(null);
+        when(tokenAmount.getAmount()).thenReturn("1500000");
+        when(tokenAmount.getDecimals()).thenReturn(6);
+
+        when(rpcApi.getTokenAccountsByOwner(any(PublicKey.class), anyMap(), anyMap()))
+                .thenReturn(tokenAccountInfo);
+
+        BigDecimal balance = walletService.getTokenBalance(
+                "11111111111111111111111111111111",
+                "So11111111111111111111111111111111111111112");
+
+        assertEquals(0, new BigDecimal("1.5").compareTo(balance));
+        verify(rpcApi).getTokenAccountsByOwner(any(PublicKey.class), anyMap(), anyMap());
+    }
+
+    @Test
+    void getTokenBalanceRejectsMissingTokenAccount() throws RpcException {
+        TokenAccountInfo tokenAccountInfo = org.mockito.Mockito.mock(TokenAccountInfo.class);
+        when(tokenAccountInfo.getValue()).thenReturn(List.of());
+        when(rpcApi.getTokenAccountsByOwner(any(PublicKey.class), anyMap(), anyMap()))
+                .thenReturn(tokenAccountInfo);
+
+        assertThrows(IllegalArgumentException.class, () -> walletService.getTokenBalance(
+                "11111111111111111111111111111111",
+                "So11111111111111111111111111111111111111112"));
+    }
+
+    @Test
+    void getTokenBalanceRejectsInvalidAddresses() {
+        assertThrows(IllegalArgumentException.class, () -> walletService.getTokenBalance(
+                "not-base58",
+                "So11111111111111111111111111111111111111112"));
+        assertThrows(IllegalArgumentException.class, () -> walletService.getTokenBalance(
+                "11111111111111111111111111111111",
+                "not-base58"));
     }
 
     @Test
