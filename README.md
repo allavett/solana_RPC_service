@@ -127,6 +127,33 @@ No transactions or mainnet support; read-only plus key generation.
 
 ---
 
+### 4.5 `transferSolToken(fromAddress, toAddress, amount, tokenAddress)`
+
+* **Input:**
+
+  * `fromAddress` – base58-encoded sender public key (must be derived from the configured mnemonic).
+  * `toAddress` – base58-encoded recipient public key.
+  * `amount` – token amount to transfer (decimal, up to the token’s decimal precision).
+  * `tokenAddress` – base58-encoded SPL token mint address.
+* **Behavior:**
+
+  * Validates both addresses, token mint, and amount (positive, non-zero).
+  * Derives the sender keypair from the mnemonic and stored derivation metadata.
+  * Resolves or creates associated token accounts for sender and recipient as needed.
+  * Builds and signs an SPL token transfer transaction for the specified mint.
+  * Submits the transaction to the testnet RPC and returns the signature.
+* **Output:**
+
+  * Transaction signature (base58 string).
+* **Failure cases:**
+
+  * Invalid sender/recipient address, token mint, or amount.
+  * Missing derivation metadata for sender address.
+  * RPC/network errors (report as RPC error).
+  * Insufficient token balance or missing token accounts.
+
+---
+
 ## 5. Solana Integration
 
 * Service talks only to **testnet**.
