@@ -154,6 +154,29 @@ No transactions or mainnet support; read-only plus key generation.
 
 ---
 
+### 4.6 `getTransactionFee(transactionHash)`
+
+* **Input:**
+
+  * `transactionHash` – base58-encoded transaction signature hash.
+* **Behavior:**
+
+  * Validates that the hash is non-empty and structurally valid as a Solana signature.
+  * Calls the Solanaj RPC client to fetch the parsed transaction details for the signature.
+  * Reads the transaction fee from the `meta.fee` field (lamports), which is populated for both SOL transfers and SPL token transfers.
+  * Converts lamports to SOL (1 SOL = 1,000,000,000 lamports).
+* **Output:**
+
+  * Fee amount as a decimal number in **SOL** with up to 9 fractional digits.
+* **Failure cases:**
+
+  * Invalid transaction hash input (report as validation error).
+  * Transaction not found or not finalized.
+  * RPC/network errors (report as RPC error).
+  * Unexpected internal errors (wrapped and logged).
+
+---
+
 ## 5. Solana Integration
 
 * Service talks only to **testnet**.
