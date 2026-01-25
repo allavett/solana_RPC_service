@@ -61,6 +61,13 @@ import java.util.stream.Collectors;
                     + transferAmount.stripTrailingZeros().toPlainString() + " SOL.");
         }
 
+        String dummyTokenMint = "Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr";
+        BigDecimal dummyTokenAmount = new BigDecimal("1.23");
+        System.out.println("\nSubmitting SPL token transfer of " + dummyTokenAmount.stripTrailingZeros().toPlainString()
+                + " DUMMY tokens from " + label + " to demoTransaction...");
+        String tokenSignature = walletService.transferSolToken(address, transactionRecipient, dummyTokenAmount, dummyTokenMint);
+        System.out.println("Token transfer signature: " + tokenSignature);
+
         List<DerivedAccount> accounts = walletService.listAccounts();
         System.out.println("\nDerived accounts held in memory:");
         for (DerivedAccount account : accounts) {
