@@ -12,6 +12,7 @@ import org.p2p.solanaj.core.Transaction;
 import org.p2p.solanaj.rpc.RpcApi;
 import org.p2p.solanaj.rpc.RpcClient;
 import org.p2p.solanaj.rpc.RpcException;
+import org.p2p.solanaj.rpc.types.AccountInfo;
 import org.p2p.solanaj.rpc.types.TokenAccountInfo;
 import org.p2p.solanaj.rpc.types.TokenResultObjects;
 
@@ -227,5 +228,81 @@ class SolanajWalletServiceTest {
                 sender,
                 "11111111111111111111111111111111",
                 new BigDecimal("0.0000000001")));
+    }
+
+    @Test
+    void transferSolTokenSubmitsTransactionForDerivedAccount() throws RpcException {
+        String sender = walletService.getNewAddress("token-sender");
+        TokenResultObjects.TokenAmountInfo supplyInfo = org.mockito.Mockito.mock(TokenResultObjects.TokenAmountInfo.class);
+        AccountInfo accountInfo = org.mockito.Mockito.mock(AccountInfo.class);
+        AccountInfo.Value value = org.mockito.Mockito.mock(AccountInfo.Value.class);
+
+        when(supplyInfo.getDecimals()).thenReturn(6);
+        when(rpcApi.getTokenSupply(any(PublicKey.class))).thenReturn(supplyInfo);
+        when(accountInfo.getValue()).thenReturn(value);
+        when(rpcApi.getAccountInfo(any(PublicKey.class))).thenReturn(accountInfo);
+        when(rpcApi.sendTransaction(any(Transaction.class), any(Account.class))).thenReturn("token-signature");
+
+        String signature = walletService.transferSolToken(
+                sender,
+                "11111111111111111111111111111111",
+                new BigDecimal("1.5"),
+                "So11111111111111111111111111111111111111112");
+
+        assertEquals("token-signature", signature);
+        verify(rpcApi).sendTransaction(any(Transaction.class), any(Account.class));
+    }
+
+    @Test
+    void transferSolTokenRejectsUnknownSender() {
+        assertThrows(IllegalArgumentException.class, () -> walletService.transferSolToken(
+                "11111111111111111111111111111111",
+                "9LCBeEKbr17HV3Us8cWR7JrnNP6tLK6QDFtMv8RevjP1",
+                new BigDecimal("1"),
+                "So11111111111111111111111111111111111111112"));
+    }
+
+    @Test
+    void transferSolTokenRejectsInvalidAddresses() {
+        assertThrows(IllegalArgumentException.class, () -> walletService.transferSolToken(
+                "not-base58",
+                "11111111111111111111111111111111",
+                new BigDecimal("1"),
+                "So11111111111111111111111111111111111111112"));
+        String sender = walletService.getNewAddress("valid-token-sender");
+        assertThrows(IllegalArgumentException.class, () -> walletService.transferSolToken(
+                sender,
+                "not-base58",
+                new BigDecimal("1"),
+                "So11111111111111111111111111111111111111112"));
+        assertThrows(IllegalArgumentException.class, () -> walletService.transferSolToken(
+                sender,
+                "11111111111111111111111111111111",
+                new BigDecimal("1"),
+                "not-base58"));
+    }
+
+    @Test
+    void transferSolTokenRejectsInvalidAmount() throws RpcException {
+        String sender = walletService.getNewAddress("token-amount-sender");
+        TokenResultObjects.TokenAmountInfo supplyInfo = org.mockito.Mockito.mock(TokenResultObjects.TokenAmountInfo.class);
+        when(supplyInfo.getDecimals()).thenReturn(6);
+        when(rpcApi.getTokenSupply(any(PublicKey.class))).thenReturn(supplyInfo);
+
+        assertThrows(IllegalArgumentException.class, () -> walletService.transferSolToken(
+                sender,
+                "11111111111111111111111111111111",
+                new BigDecimal("-1"),
+                "So11111111111111111111111111111111111111112"));
+        assertThrows(IllegalArgumentException.class, () -> walletService.transferSolToken(
+                sender,
+                "11111111111111111111111111111111",
+                new BigDecimal("0"),
+                "So11111111111111111111111111111111111111112"));
+        assertThrows(IllegalArgumentException.class, () -> walletService.transferSolToken(
+                sender,
+                "11111111111111111111111111111111",
+                new BigDecimal("0.0000001"),
+                "So11111111111111111111111111111111111111112"));
     }
 }
