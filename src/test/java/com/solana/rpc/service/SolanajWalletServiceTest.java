@@ -12,6 +12,7 @@ import org.p2p.solanaj.core.Transaction;
 import org.p2p.solanaj.rpc.RpcApi;
 import org.p2p.solanaj.rpc.RpcClient;
 import org.p2p.solanaj.rpc.RpcException;
+import org.p2p.solanaj.rpc.types.ConfirmedTransaction;
 import org.p2p.solanaj.rpc.types.AccountInfo;
 import org.p2p.solanaj.rpc.types.TokenAccountInfo;
 import org.p2p.solanaj.rpc.types.TokenResultObjects;
@@ -119,6 +120,51 @@ class SolanajWalletServiceTest {
     @Test
     void getBalanceByLabelRejectsBlankLabel() {
         assertThrows(IllegalArgumentException.class, () -> walletService.getBalanceByLabel(" "));
+    }
+
+    @Test
+    void getTransactionFeeReturnsConvertedSolFee() throws RpcException {
+        ConfirmedTransaction transaction = org.mockito.Mockito.mock(ConfirmedTransaction.class);
+        ConfirmedTransaction.Meta meta = org.mockito.Mockito.mock(ConfirmedTransaction.Meta.class);
+
+        when(rpcApi.getTransaction("5N1TH8iYamq6WekKQZqygZ5q9U4fK9fE7eY1B2VotS1Y9z9WohV8AhWnM9D5HHu7HaqLvq1ArM4gZgG5EoF7nuh2"))
+                .thenReturn(transaction);
+        when(transaction.getMeta()).thenReturn(meta);
+        when(meta.getFee()).thenReturn(5_000L);
+
+        BigDecimal fee = walletService.getTransactionFee(
+                "5N1TH8iYamq6WekKQZqygZ5q9U4fK9fE7eY1B2VotS1Y9z9WohV8AhWnM9D5HHu7HaqLvq1ArM4gZgG5EoF7nuh2");
+
+        assertEquals(new BigDecimal("0.000005000"), fee);
+        verify(rpcApi).getTransaction(any(String.class));
+    }
+
+    @Test
+    void getTransactionFeeRejectsBlankHash() {
+        assertThrows(IllegalArgumentException.class, () -> walletService.getTransactionFee(" "));
+    }
+
+    @Test
+    void getTransactionFeeRejectsInvalidHash() {
+        assertThrows(IllegalArgumentException.class, () -> walletService.getTransactionFee("not-base58"));
+    }
+
+    @Test
+    void getTransactionFeeRejectsMissingTransaction() throws RpcException {
+        when(rpcApi.getTransaction(any(String.class))).thenReturn(null);
+
+        assertThrows(IllegalStateException.class, () -> walletService.getTransactionFee(
+                "5N1TH8iYamq6WekKQZqygZ5q9U4fK9fE7eY1B2VotS1Y9z9WohV8AhWnM9D5HHu7HaqLvq1ArM4gZgG5EoF7nuh2"));
+    }
+
+    @Test
+    void getTransactionFeeRejectsMissingMetadata() throws RpcException {
+        ConfirmedTransaction transaction = org.mockito.Mockito.mock(ConfirmedTransaction.class);
+        when(rpcApi.getTransaction(any(String.class))).thenReturn(transaction);
+        when(transaction.getMeta()).thenReturn(null);
+
+        assertThrows(IllegalStateException.class, () -> walletService.getTransactionFee(
+                "5N1TH8iYamq6WekKQZqygZ5q9U4fK9fE7eY1B2VotS1Y9z9WohV8AhWnM9D5HHu7HaqLvq1ArM4gZgG5EoF7nuh2"));
     }
 
     @Test

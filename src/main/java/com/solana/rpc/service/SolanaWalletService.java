@@ -79,4 +79,12 @@ public interface SolanaWalletService {
      * @return transaction signature in base58 format
      */
     String transferSolToken(String fromAddress, String toAddress, BigDecimal amount, String tokenAddress);
+
+    /**
+     * Retrieves the fee paid for a transaction.
+     *
+     * @param transactionHash base58-encoded transaction signature hash
+     * @return fee in SOL with up to nine fractional digits
+     */
+    BigDecimal getTransactionFee(String transactionHash);
 }

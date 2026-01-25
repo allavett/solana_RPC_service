@@ -12,9 +12,11 @@ import org.p2p.solanaj.programs.TokenProgram;
 import org.p2p.solanaj.rpc.RpcApi;
 import org.p2p.solanaj.rpc.RpcClient;
 import org.p2p.solanaj.rpc.RpcException;
+import org.p2p.solanaj.rpc.types.ConfirmedTransaction;
 import org.p2p.solanaj.rpc.types.AccountInfo;
 import org.p2p.solanaj.rpc.types.TokenAccountInfo;
 import org.p2p.solanaj.rpc.types.TokenResultObjects;
+import org.p2p.solanaj.utils.Base58;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -226,9 +228,40 @@ public class SolanajWalletService implements SolanaWalletService {
         }
     }
 
+    @Override
+    public BigDecimal getTransactionFee(String transactionHash) {
+        validateTransactionHash(transactionHash);
+
+        try {
+            RpcApi api = rpcClient.getApi();
+            LOGGER.info(() -> "Requesting transaction fee for signature " + transactionHash
+                    + " via endpoint " + SolanaApplicationContext.getConfig().getSolanaRpcUrl());
+            ConfirmedTransaction transaction = api.getTransaction(transactionHash);
+            if (transaction == null || transaction.getMeta() == null) {
+                throw new IllegalStateException("Transaction metadata is unavailable for signature: " + transactionHash);
+            }
+            long feeLamports = transaction.getMeta().getFee();
+            return BigDecimal.valueOf(feeLamports).divide(LAMPORTS_PER_SOL, 9, RoundingMode.DOWN);
+        } catch (RpcException e) {
+            LOGGER.log(Level.SEVERE, "RPC getTransaction call failed", e);
+            throw new IllegalStateException("Failed to fetch transaction fee from Solana RPC", e);
+        }
+    }
+
     private void validateLabel(String label) {
         if (label == null || label.isBlank()) {
             throw new IllegalArgumentException("Label must not be null or blank");
+        }
+    }
+
+    private void validateTransactionHash(String transactionHash) {
+        if (transactionHash == null || transactionHash.isBlank()) {
+            throw new IllegalArgumentException("Transaction hash must not be null or blank");
+        }
+        try {
+            Base58.decode(transactionHash);
+        } catch (RuntimeException e) {
+            throw new IllegalArgumentException("Transaction hash is not a valid base58-encoded signature", e);
         }
     }
 
