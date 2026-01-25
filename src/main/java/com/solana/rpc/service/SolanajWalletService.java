@@ -6,17 +6,20 @@ import com.solana.rpc.wallet.DerivationService;
 import org.p2p.solanaj.core.Account;
 import org.p2p.solanaj.core.PublicKey;
 import org.p2p.solanaj.core.Transaction;
+import org.p2p.solanaj.programs.AssociatedTokenProgram;
 import org.p2p.solanaj.programs.SystemProgram;
+import org.p2p.solanaj.programs.TokenProgram;
 import org.p2p.solanaj.rpc.RpcApi;
 import org.p2p.solanaj.rpc.RpcClient;
 import org.p2p.solanaj.rpc.RpcException;
+import org.p2p.solanaj.rpc.types.AccountInfo;
 import org.p2p.solanaj.rpc.types.TokenAccountInfo;
 import org.p2p.solanaj.rpc.types.TokenResultObjects;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.util.Collections;
 import java.util.List;
+import java.util.Collections;
 import java.util.Map;
 import java.util.Objects;
 import java.util.logging.Level;
@@ -171,6 +174,58 @@ public class SolanajWalletService implements SolanaWalletService {
         }
     }
 
+    @Override
+    public String transferSolToken(String fromAddress, String toAddress, BigDecimal amount, String tokenAddress) {
+        PublicKey fromPublicKey = parseRequiredPublicKey(fromAddress, "Sender");
+        PublicKey toPublicKey = parseRequiredPublicKey(toAddress, "Recipient");
+        PublicKey mintPublicKey = parseRequiredPublicKey(tokenAddress, "Token mint");
+
+        DerivedAccount derivedAccount = accountRepository.findByPublicKey(fromAddress)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown derived address: " + fromAddress));
+
+        Account sender = derivationService.derive(
+                derivedAccount.getAccount(),
+                derivedAccount.getChange(),
+                derivedAccount.getIndex());
+
+        try {
+            RpcApi api = rpcClient.getApi();
+            int decimals = fetchTokenDecimals(api, mintPublicKey);
+            long baseUnits = validateAndConvertTokenAmount(amount, decimals);
+
+            PublicKey senderTokenAccount = findAssociatedTokenAddress(fromPublicKey, mintPublicKey);
+            PublicKey recipientTokenAccount = findAssociatedTokenAddress(toPublicKey, mintPublicKey);
+
+            Transaction transaction = new Transaction();
+
+            if (!accountExists(api, senderTokenAccount)) {
+                transaction.addInstruction(AssociatedTokenProgram.createIdempotent(
+                        fromPublicKey, fromPublicKey, mintPublicKey));
+            }
+
+            if (!accountExists(api, recipientTokenAccount)) {
+                transaction.addInstruction(AssociatedTokenProgram.createIdempotent(
+                        fromPublicKey, toPublicKey, mintPublicKey));
+            }
+
+            transaction.addInstruction(TokenProgram.transferChecked(
+                    senderTokenAccount,
+                    recipientTokenAccount,
+                    baseUnits,
+                    (byte) decimals,
+                    fromPublicKey,
+                    mintPublicKey));
+
+            LOGGER.info(() -> "Submitting SPL token transfer from " + fromAddress + " to " + toAddress
+                    + " for " + amount + " tokens (base units=" + baseUnits + ", decimals=" + decimals + ").");
+
+            return api.sendTransaction(transaction, sender);
+        } catch (RpcException e) {
+            LOGGER.log(Level.SEVERE, "RPC token transfer call failed", e);
+            throw new IllegalStateException("Failed to transfer SPL token via Solana RPC", e);
+        }
+    }
+
     private void validateLabel(String label) {
         if (label == null || label.isBlank()) {
             throw new IllegalArgumentException("Label must not be null or blank");
@@ -238,6 +293,52 @@ public class SolanajWalletService implements SolanaWalletService {
         } catch (ArithmeticException e) {
             throw new IllegalArgumentException("Amount must be convertible to lamports without rounding", e);
         }
+    }
+
+    private int fetchTokenDecimals(RpcApi api, PublicKey mintPublicKey) throws RpcException {
+        TokenResultObjects.TokenAmountInfo supplyInfo = api.getTokenSupply(mintPublicKey);
+        if (supplyInfo == null) {
+            throw new IllegalStateException("Token mint metadata is unavailable for: " + mintPublicKey.toBase58());
+        }
+        int decimals = supplyInfo.getDecimals();
+        if (decimals < 0 || decimals > 255) {
+            throw new IllegalArgumentException("Token decimals are out of range: " + decimals);
+        }
+        return decimals;
+    }
+
+    private long validateAndConvertTokenAmount(BigDecimal amount, int decimals) {
+        if (amount == null) {
+            throw new IllegalArgumentException("Amount must not be null");
+        }
+        if (amount.signum() <= 0) {
+            throw new IllegalArgumentException("Amount must be greater than zero");
+        }
+
+        BigDecimal normalizedAmount = amount.stripTrailingZeros();
+        if (normalizedAmount.scale() > decimals) {
+            throw new IllegalArgumentException("Amount must not have more than " + decimals + " decimal places");
+        }
+
+        BigDecimal baseUnitsDecimal = amount.movePointRight(decimals);
+        try {
+            return baseUnitsDecimal.setScale(0, RoundingMode.UNNECESSARY).longValueExact();
+        } catch (ArithmeticException e) {
+            throw new IllegalArgumentException("Amount must be convertible to base units without rounding", e);
+        }
+    }
+
+    private boolean accountExists(RpcApi api, PublicKey address) throws RpcException {
+        AccountInfo accountInfo = api.getAccountInfo(address);
+        return accountInfo != null && accountInfo.getValue() != null;
+    }
+
+    private PublicKey findAssociatedTokenAddress(PublicKey owner, PublicKey mint) {
+        List<byte[]> seeds = List.of(
+                owner.toByteArray(),
+                TokenProgram.PROGRAM_ID.toByteArray(),
+                mint.toByteArray());
+        return PublicKey.findProgramAddress(seeds, AssociatedTokenProgram.PROGRAM_ID).getAddress();
     }
 
     private int determineNextIndex() {

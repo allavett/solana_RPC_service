@@ -68,4 +68,15 @@ public interface SolanaWalletService {
      * @return token balance in token units with mint decimals applied
      */
     BigDecimal getTokenBalance(String base58Address, String tokenMintAddress);
+
+    /**
+     * Transfers SPL tokens from a derived account to a target address.
+     *
+     * @param fromAddress base58-encoded sender public key derived from the configured mnemonic
+     * @param toAddress base58-encoded recipient public key
+     * @param amount token amount to transfer
+     * @param tokenAddress base58-encoded SPL token mint address
+     * @return transaction signature in base58 format
+     */
+    String transferSolToken(String fromAddress, String toAddress, BigDecimal amount, String tokenAddress);
 }
