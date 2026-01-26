@@ -186,8 +186,8 @@ No transactions or mainnet support; read-only plus key generation.
 
   * Validates that the transaction is non-null and contains at least one instruction.
   * Uses Solanaj `simulateTransaction` to obtain a recent blockhash context and compute the expected compute units for the transaction.
-  * Calls Solanaj `getPrioritizationFee` with the same transaction message to fetch the current prioritization fee estimate for the requested compute units.
-  * Combines base fee (lamports per signature from the simulation result) with the prioritization fee (micro-lamports per CU × CU) to derive the total estimated fee.
+  * Calls Solanaj `getRecentPrioritizationFees` with the same transaction message to fetch a list of recent prioritization fee estimates.
+  * Combines base fee (lamports per signature from the simulation result) with a selected recent prioritization fee (micro-lamports per CU × CU) to derive the total estimated fee.
   * Converts lamports to SOL (1 SOL = 1,000,000,000 lamports).
 * **Output:**
 
@@ -196,7 +196,7 @@ No transactions or mainnet support; read-only plus key generation.
 
   * Null or empty transaction input (report as validation error).
   * Simulation fails (e.g., missing recent blockhash or invalid instruction set).
-  * RPC/network errors when fetching prioritization fee (report as RPC error).
+  * RPC/network errors when fetching recent prioritization fees (report as RPC error).
   * Unexpected internal errors (wrapped and logged).
 
 ---
