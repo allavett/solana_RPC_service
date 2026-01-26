@@ -177,6 +177,30 @@ No transactions or mainnet support; read-only plus key generation.
 
 ---
 
+### 4.7 `getEstimatedTransactionFee(transaction)`
+
+* **Input:**
+
+  * `transaction` – a fully populated (but unsigned or signed) Solanaj `Transaction` instance that matches the intended transfer/instruction set.
+* **Behavior:**
+
+  * Validates that the transaction is non-null and contains at least one instruction.
+  * Uses Solanaj `simulateTransaction` to obtain a recent blockhash context and compute the expected compute units for the transaction.
+  * Calls Solanaj `getRecentPrioritizationFees` with the same transaction message to fetch a list of recent prioritization fee estimates.
+  * Combines base fee (lamports per signature from the simulation result) with a selected recent prioritization fee (micro-lamports per CU × CU) to derive the total estimated fee.
+  * Converts lamports to SOL (1 SOL = 1,000,000,000 lamports).
+* **Output:**
+
+  * Estimated fee amount as a decimal number in **SOL** with up to 9 fractional digits.
+* **Failure cases:**
+
+  * Null or empty transaction input (report as validation error).
+  * Simulation fails (e.g., missing recent blockhash or invalid instruction set).
+  * RPC/network errors when fetching recent prioritization fees (report as RPC error).
+  * Unexpected internal errors (wrapped and logged).
+
+---
+
 ## 5. Solana Integration
 
 * Service talks only to **testnet**.
