@@ -47,6 +47,7 @@ public class SolanajWalletService implements SolanaWalletService {
     private static final Logger LOGGER = Logger.getLogger(SolanajWalletService.class.getName());
     private static final BigDecimal LAMPORTS_PER_SOL = new BigDecimal("1000000000");
     private static final long MAX_PRIORITY_FEE_LAMPORTS = 5_000L;
+    private static final long DEFAULT_COMPUTE_UNIT_LIMIT = 100_000L;
     private static final int DEFAULT_ACCOUNT = 0;
     private static final int DEFAULT_CHANGE = 0;
 
@@ -494,7 +495,10 @@ public class SolanajWalletService implements SolanaWalletService {
         if (instructions == null) {
             throw new IllegalStateException("Transaction instructions are unavailable");
         }
-        int computeUnitLimit = computeUnits > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) computeUnits;
+        long resolvedComputeUnitLimit = computeUnits > 0 ? computeUnits : DEFAULT_COMPUTE_UNIT_LIMIT;
+        int computeUnitLimit = resolvedComputeUnitLimit > Integer.MAX_VALUE
+                ? (int) DEFAULT_COMPUTE_UNIT_LIMIT
+                : (int) resolvedComputeUnitLimit;
         instructions.add(0, ComputeBudgetProgram.setComputeUnitLimit(computeUnitLimit));
         if (prioritizationFeeMicroLamports <= 0) {
             return;
