@@ -9,20 +9,26 @@ import org.mockito.MockitoAnnotations;
 import org.p2p.solanaj.core.Account;
 import org.p2p.solanaj.core.PublicKey;
 import org.p2p.solanaj.core.Transaction;
+import org.p2p.solanaj.programs.SystemProgram;
 import org.p2p.solanaj.rpc.RpcApi;
 import org.p2p.solanaj.rpc.RpcClient;
 import org.p2p.solanaj.rpc.RpcException;
 import org.p2p.solanaj.rpc.types.ConfirmedTransaction;
 import org.p2p.solanaj.rpc.types.AccountInfo;
+import org.p2p.solanaj.rpc.types.RecentPrioritizationFees;
+import org.p2p.solanaj.rpc.types.SimulatedTransaction;
 import org.p2p.solanaj.rpc.types.TokenAccountInfo;
 import org.p2p.solanaj.rpc.types.TokenResultObjects;
 
+import java.lang.reflect.Field;
 import java.math.BigDecimal;
+import java.util.Map;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -165,6 +171,48 @@ class SolanajWalletServiceTest {
 
         assertThrows(IllegalStateException.class, () -> walletService.getTransactionFee(
                 "5N1TH8iYamq6WekKQZqygZ5q9U4fK9fE7eY1B2VotS1Y9z9WohV8AhWnM9D5HHu7HaqLvq1ArM4gZgG5EoF7nuh2"));
+    }
+
+    @Test
+    void getEstimatedTransactionFeeCombinesBaseAndPriorityFee() throws Exception {
+        Transaction transaction = new Transaction();
+        transaction.addInstruction(SystemProgram.transfer(
+                new PublicKey("11111111111111111111111111111111"),
+                new PublicKey("11111111111111111111111111111111"),
+                1_000L));
+        transaction.setRecentBlockHash("11111111111111111111111111111111");
+        transaction.sign(new Account());
+
+        SimulatedTransaction simulatedTransaction = new SimulatedTransaction();
+        SimulatedTransaction.Value value = new SimulatedTransaction.Value();
+        setField(value, "logs", List.of("Program 11111111111111111111111111111111 consumed 2500 of 200000 compute units"));
+        setField(simulatedTransaction, "value", value);
+
+        when(rpcApi.simulateTransaction(any(String.class), anyList())).thenReturn(simulatedTransaction);
+        when(rpcApi.getFeeForMessage(any(String.class))).thenReturn(5_000L);
+        RecentPrioritizationFees feeEstimate = new RecentPrioritizationFees(Map.of(
+                "slot", 1L,
+                "prioritizationFee", 2_000L));
+        when(rpcApi.getRecentPrioritizationFees(anyList())).thenReturn(List.of(feeEstimate));
+
+        BigDecimal fee = walletService.getEstimatedTransactionFee(transaction);
+
+        assertEquals(new BigDecimal("0.000005005"), fee);
+        verify(rpcApi).simulateTransaction(any(String.class), anyList());
+        verify(rpcApi).getFeeForMessage(any(String.class));
+        verify(rpcApi).getRecentPrioritizationFees(anyList());
+    }
+
+    @Test
+    void getEstimatedTransactionFeeRejectsNullTransaction() {
+        assertThrows(IllegalArgumentException.class, () -> walletService.getEstimatedTransactionFee(null));
+    }
+
+    @Test
+    void getEstimatedTransactionFeeRejectsEmptyTransaction() {
+        Transaction transaction = new Transaction();
+
+        assertThrows(IllegalArgumentException.class, () -> walletService.getEstimatedTransactionFee(transaction));
     }
 
     @Test
@@ -350,5 +398,11 @@ class SolanajWalletServiceTest {
                 "11111111111111111111111111111111",
                 new BigDecimal("0.0000001"),
                 "So11111111111111111111111111111111111111112"));
+    }
+
+    private static void setField(Object target, String fieldName, Object value) throws Exception {
+        Field field = target.getClass().getDeclaredField(fieldName);
+        field.setAccessible(true);
+        field.set(target, value);
     }
 }
