@@ -46,6 +46,7 @@ public class SolanajWalletService implements SolanaWalletService {
 
     private static final Logger LOGGER = Logger.getLogger(SolanajWalletService.class.getName());
     private static final BigDecimal LAMPORTS_PER_SOL = new BigDecimal("1000000000");
+    private static final long MAX_PRIORITY_FEE_LAMPORTS = 5_000L;
     private static final int DEFAULT_ACCOUNT = 0;
     private static final int DEFAULT_CHANGE = 0;
 
@@ -151,7 +152,7 @@ public class SolanajWalletService implements SolanaWalletService {
 
         try {
             RpcApi api = rpcClient.getApi();
-            addPrioritizationFeeInstruction(transaction, api);
+            addPrioritizationFeeInstruction(transaction, api, sender);
             LOGGER.info(() -> "Submitting SOL transfer from " + fromAddress + " to " + toAddress
                     + " for " + amount + " SOL (" + lamports + " lamports).");
             return api.sendTransaction(transaction, sender);
@@ -234,7 +235,7 @@ public class SolanajWalletService implements SolanaWalletService {
             LOGGER.info(() -> "Submitting SPL token transfer from " + fromAddress + " to " + toAddress
                     + " for " + amount + " tokens (base units=" + baseUnits + ", decimals=" + decimals + ").");
 
-            addPrioritizationFeeInstruction(transaction, api);
+            addPrioritizationFeeInstruction(transaction, api, sender);
             return api.sendTransaction(transaction, sender);
         } catch (RpcException e) {
             LOGGER.log(Level.SEVERE, "RPC token transfer call failed", e);
@@ -296,6 +297,9 @@ public class SolanajWalletService implements SolanaWalletService {
             BigDecimal prioritizationLamports = BigDecimal.valueOf(prioritizationFeeMicroLamports)
                     .multiply(BigDecimal.valueOf(computeUnits))
                     .divide(BigDecimal.valueOf(1_000_000), 0, RoundingMode.DOWN);
+            if (prioritizationLamports.compareTo(BigDecimal.valueOf(MAX_PRIORITY_FEE_LAMPORTS)) > 0) {
+                prioritizationLamports = BigDecimal.valueOf(MAX_PRIORITY_FEE_LAMPORTS);
+            }
 
             BigDecimal totalLamports = BigDecimal.valueOf(baseFeeLamports).add(prioritizationLamports);
             return totalLamports.divide(LAMPORTS_PER_SOL, 9, RoundingMode.DOWN);
@@ -476,22 +480,36 @@ public class SolanajWalletService implements SolanaWalletService {
         }
     }
 
-    private void addPrioritizationFeeInstruction(Transaction transaction, RpcApi api) throws RpcException {
+    private void addPrioritizationFeeInstruction(Transaction transaction, RpcApi api, Account feePayer) throws RpcException {
         Message message = extractMessage(transaction);
+        ensureFeePayer(message, feePayer);
+        ensureRecentBlockhash(transaction, message, api);
+        ensureSerializedMessage(transaction, message);
+        String serializedTransaction = Base64.getEncoder().encodeToString(transaction.serialize());
         List<PublicKey> accountKeys = extractAccountKeys(message);
+        SimulatedTransaction simulatedTransaction = api.simulateTransaction(serializedTransaction, accountKeys);
+        long computeUnits = extractComputeUnits(simulatedTransaction);
         long prioritizationFeeMicroLamports = fetchPrioritizationFeeMicroLamports(api, accountKeys);
-        if (prioritizationFeeMicroLamports <= 0) {
-            return;
-        }
-        int feeMicroLamports = prioritizationFeeMicroLamports > Integer.MAX_VALUE
-                ? Integer.MAX_VALUE
-                : (int) prioritizationFeeMicroLamports;
-        TransactionInstruction instruction = ComputeBudgetProgram.setComputeUnitPrice(feeMicroLamports);
         List<TransactionInstruction> instructions = extractInstructions(message);
         if (instructions == null) {
             throw new IllegalStateException("Transaction instructions are unavailable");
         }
-        instructions.add(0, instruction);
+        int computeUnitLimit = computeUnits > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) computeUnits;
+        instructions.add(0, ComputeBudgetProgram.setComputeUnitLimit(computeUnitLimit));
+        if (prioritizationFeeMicroLamports <= 0) {
+            return;
+        }
+        long maxMicroLamports = computeUnits == 0
+                ? 0
+                : (MAX_PRIORITY_FEE_LAMPORTS * 1_000_000L) / computeUnits;
+        if (maxMicroLamports <= 0) {
+            return;
+        }
+        long boundedFeeMicroLamports = Math.min(prioritizationFeeMicroLamports, maxMicroLamports);
+        int feeMicroLamports = boundedFeeMicroLamports > Integer.MAX_VALUE
+                ? Integer.MAX_VALUE
+                : (int) boundedFeeMicroLamports;
+        instructions.add(1, ComputeBudgetProgram.setComputeUnitPrice(feeMicroLamports));
     }
 
     private long fetchPrioritizationFeeMicroLamports(RpcApi api, List<PublicKey> accountKeys) throws RpcException {
@@ -499,6 +517,21 @@ public class SolanajWalletService implements SolanaWalletService {
                 ? api.getRecentPrioritizationFees()
                 : api.getRecentPrioritizationFees(accountKeys);
         return selectPrioritizationFee(prioritizationFees);
+    }
+
+    private void ensureFeePayer(Message message, Account feePayer) {
+        if (feePayer == null) {
+            throw new IllegalArgumentException("Fee payer must not be null");
+        }
+        try {
+            Field feePayerField = Message.class.getDeclaredField("feePayer");
+            feePayerField.setAccessible(true);
+            if (feePayerField.get(message) == null) {
+                feePayerField.set(message, feePayer);
+            }
+        } catch (NoSuchFieldException | IllegalAccessException e) {
+            throw new IllegalStateException("Unable to set fee payer on transaction message", e);
+        }
     }
 
     @SuppressWarnings("unchecked")

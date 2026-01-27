@@ -15,6 +15,7 @@ import org.p2p.solanaj.rpc.RpcClient;
 import org.p2p.solanaj.rpc.RpcException;
 import org.p2p.solanaj.rpc.types.ConfirmedTransaction;
 import org.p2p.solanaj.rpc.types.AccountInfo;
+import org.p2p.solanaj.rpc.types.LatestBlockhash;
 import org.p2p.solanaj.rpc.types.RecentPrioritizationFees;
 import org.p2p.solanaj.rpc.types.SimulatedTransaction;
 import org.p2p.solanaj.rpc.types.TokenAccountInfo;
@@ -282,8 +283,9 @@ class SolanajWalletServiceTest {
     }
 
     @Test
-    void transferSolSubmitsTransactionForDerivedAccount() throws RpcException {
+    void transferSolSubmitsTransactionForDerivedAccount() throws Exception {
         String sender = walletService.getNewAddress("sender");
+        stubComputeBudgetSimulation();
         when(rpcApi.sendTransaction(any(Transaction.class), any(Account.class))).thenReturn("signature");
 
         String signature = walletService.transferSol(sender, "11111111111111111111111111111111", new BigDecimal("1.5"));
@@ -332,12 +334,13 @@ class SolanajWalletServiceTest {
     }
 
     @Test
-    void transferSolTokenSubmitsTransactionForDerivedAccount() throws RpcException {
+    void transferSolTokenSubmitsTransactionForDerivedAccount() throws Exception {
         String sender = walletService.getNewAddress("token-sender");
         TokenResultObjects.TokenAmountInfo supplyInfo = org.mockito.Mockito.mock(TokenResultObjects.TokenAmountInfo.class);
         AccountInfo accountInfo = org.mockito.Mockito.mock(AccountInfo.class);
         AccountInfo.Value value = org.mockito.Mockito.mock(AccountInfo.Value.class);
 
+        stubComputeBudgetSimulation();
         when(supplyInfo.getDecimals()).thenReturn(6);
         when(rpcApi.getTokenSupply(any(PublicKey.class))).thenReturn(supplyInfo);
         when(accountInfo.getValue()).thenReturn(value);
@@ -411,5 +414,19 @@ class SolanajWalletServiceTest {
         Field field = target.getClass().getDeclaredField(fieldName);
         field.setAccessible(true);
         field.set(target, value);
+    }
+
+    private void stubComputeBudgetSimulation() throws Exception {
+        LatestBlockhash latestBlockhash = new LatestBlockhash();
+        LatestBlockhash.Value blockhashValue = new LatestBlockhash.Value();
+        setField(blockhashValue, "blockhash", "11111111111111111111111111111111");
+        setField(latestBlockhash, "value", blockhashValue);
+        when(rpcApi.getLatestBlockhash()).thenReturn(latestBlockhash);
+
+        SimulatedTransaction simulatedTransaction = new SimulatedTransaction();
+        SimulatedTransaction.Value simValue = new SimulatedTransaction.Value();
+        setField(simValue, "logs", List.of("Program 11111111111111111111111111111111 consumed 2500 of 200000 compute units"));
+        setField(simulatedTransaction, "value", simValue);
+        when(rpcApi.simulateTransaction(any(String.class), anyList())).thenReturn(simulatedTransaction);
     }
 }
