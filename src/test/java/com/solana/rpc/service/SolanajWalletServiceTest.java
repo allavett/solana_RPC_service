@@ -190,10 +190,17 @@ class SolanajWalletServiceTest {
 
         when(rpcApi.simulateTransaction(any(String.class), anyList())).thenReturn(simulatedTransaction);
         when(rpcApi.getFeeForMessage(any(String.class))).thenReturn(5_000L);
-        RecentPrioritizationFees feeEstimate = new RecentPrioritizationFees(Map.of(
+        RecentPrioritizationFees lowFeeEstimate = new RecentPrioritizationFees(Map.of(
                 "slot", 1L,
+                "prioritizationFee", 1_000L));
+        RecentPrioritizationFees midFeeEstimate = new RecentPrioritizationFees(Map.of(
+                "slot", 2L,
                 "prioritizationFee", 2_000L));
-        when(rpcApi.getRecentPrioritizationFees(anyList())).thenReturn(List.of(feeEstimate));
+        RecentPrioritizationFees highFeeEstimate = new RecentPrioritizationFees(Map.of(
+                "slot", 3L,
+                "prioritizationFee", 3_000L));
+        when(rpcApi.getRecentPrioritizationFees(anyList()))
+                .thenReturn(List.of(highFeeEstimate, lowFeeEstimate, midFeeEstimate));
 
         BigDecimal fee = walletService.getEstimatedTransactionFee(transaction);
 

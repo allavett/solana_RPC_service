@@ -531,9 +531,16 @@ public class SolanajWalletService implements SolanaWalletService {
         if (prioritizationFees == null || prioritizationFees.isEmpty()) {
             return 0L;
         }
-        return prioritizationFees.stream()
-                .mapToLong(RecentPrioritizationFees::getPrioritizationFee)
-                .max()
-                .orElse(0L);
+        List<Long> fees = prioritizationFees.stream()
+                .map(RecentPrioritizationFees::getPrioritizationFee)
+                .sorted()
+                .toList();
+        int size = fees.size();
+        if (size % 2 == 1) {
+            return fees.get(size / 2);
+        }
+        long lower = fees.get(size / 2 - 1);
+        long upper = fees.get(size / 2);
+        return (lower + upper) / 2;
     }
 }
