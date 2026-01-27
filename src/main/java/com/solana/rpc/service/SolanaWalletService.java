@@ -87,4 +87,12 @@ public interface SolanaWalletService {
      * @return fee in SOL with up to nine fractional digits
      */
     BigDecimal getTransactionFee(String transactionHash);
+
+    /**
+     * Estimates the fee for a prepared transaction using simulation and recent prioritization fees.
+     *
+     * @param transaction prepared Solanaj transaction
+     * @return estimated fee in SOL with up to nine fractional digits
+     */
+    BigDecimal getEstimatedTransactionFee(org.p2p.solanaj.core.Transaction transaction);
 }

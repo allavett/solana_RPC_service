@@ -4,8 +4,11 @@ import com.solana.rpc.config.SolanaApplicationContext;
 import com.solana.rpc.model.DerivedAccount;
 import com.solana.rpc.wallet.DerivationService;
 import org.p2p.solanaj.core.Account;
+import org.p2p.solanaj.core.AccountMeta;
+import org.p2p.solanaj.core.Message;
 import org.p2p.solanaj.core.PublicKey;
 import org.p2p.solanaj.core.Transaction;
+import org.p2p.solanaj.core.TransactionInstruction;
 import org.p2p.solanaj.programs.AssociatedTokenProgram;
 import org.p2p.solanaj.programs.SystemProgram;
 import org.p2p.solanaj.programs.TokenProgram;
@@ -14,16 +17,24 @@ import org.p2p.solanaj.rpc.RpcClient;
 import org.p2p.solanaj.rpc.RpcException;
 import org.p2p.solanaj.rpc.types.ConfirmedTransaction;
 import org.p2p.solanaj.rpc.types.AccountInfo;
+import org.p2p.solanaj.rpc.types.LatestBlockhash;
+import org.p2p.solanaj.rpc.types.RecentPrioritizationFees;
+import org.p2p.solanaj.rpc.types.SimulatedTransaction;
 import org.p2p.solanaj.rpc.types.TokenAccountInfo;
 import org.p2p.solanaj.rpc.types.TokenResultObjects;
 import org.p2p.solanaj.utils.Base58;
 
+import java.lang.reflect.Field;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.Base64;
 import java.util.List;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Objects;
+import java.util.OptionalLong;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -248,6 +259,55 @@ public class SolanajWalletService implements SolanaWalletService {
         }
     }
 
+    @Override
+    public BigDecimal getEstimatedTransactionFee(Transaction transaction) {
+        if (transaction == null) {
+            throw new IllegalArgumentException("Transaction must not be null");
+        }
+
+        Message message = extractMessage(transaction);
+        List<TransactionInstruction> instructions = extractInstructions(message);
+        if (instructions == null || instructions.isEmpty()) {
+            throw new IllegalArgumentException("Transaction must contain at least one instruction");
+        }
+
+        try {
+            RpcApi api = rpcClient.getApi();
+            ensureRecentBlockhash(transaction, message, api);
+
+            ensureSerializedMessage(transaction, message);
+            String serializedTransaction = Base64.getEncoder().encodeToString(transaction.serialize());
+            List<AccountMeta> accountMetas = message.getAccountKeys();
+            List<PublicKey> accountKeys = accountMetas == null
+                    ? List.of()
+                    : accountMetas.stream().map(AccountMeta::getPublicKey).toList();
+
+            SimulatedTransaction simulatedTransaction = api.simulateTransaction(serializedTransaction, accountKeys);
+            long computeUnits = extractComputeUnits(simulatedTransaction);
+
+            String messageBase64 = Base64.getEncoder().encodeToString(message.serialize());
+            Long baseFeeLamports = api.getFeeForMessage(messageBase64);
+            if (baseFeeLamports == null) {
+                throw new IllegalStateException("Base fee is unavailable for the provided transaction message");
+            }
+
+            List<RecentPrioritizationFees> prioritizationFees = accountKeys.isEmpty()
+                    ? api.getRecentPrioritizationFees()
+                    : api.getRecentPrioritizationFees(accountKeys);
+            long prioritizationFeeMicroLamports = selectPrioritizationFee(prioritizationFees);
+
+            BigDecimal prioritizationLamports = BigDecimal.valueOf(prioritizationFeeMicroLamports)
+                    .multiply(BigDecimal.valueOf(computeUnits))
+                    .divide(BigDecimal.valueOf(1_000_000), 0, RoundingMode.DOWN);
+
+            BigDecimal totalLamports = BigDecimal.valueOf(baseFeeLamports).add(prioritizationLamports);
+            return totalLamports.divide(LAMPORTS_PER_SOL, 9, RoundingMode.DOWN);
+        } catch (RpcException e) {
+            LOGGER.log(Level.SEVERE, "RPC getEstimatedTransactionFee call failed", e);
+            throw new IllegalStateException("Failed to estimate transaction fee via Solana RPC", e);
+        }
+    }
+
     private void validateLabel(String label) {
         if (label == null || label.isBlank()) {
             throw new IllegalArgumentException("Label must not be null or blank");
@@ -391,5 +451,96 @@ public class SolanajWalletService implements SolanaWalletService {
         accountRepository.save(metadata);
 
         return publicKey;
+    }
+
+    private Message extractMessage(Transaction transaction) {
+        try {
+            Field messageField = Transaction.class.getDeclaredField("message");
+            messageField.setAccessible(true);
+            Message message = (Message) messageField.get(transaction);
+            if (message == null) {
+                throw new IllegalStateException("Transaction message is unavailable");
+            }
+            return message;
+        } catch (NoSuchFieldException | IllegalAccessException e) {
+            throw new IllegalStateException("Unable to access transaction message", e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<TransactionInstruction> extractInstructions(Message message) {
+        try {
+            Field instructionsField = Message.class.getDeclaredField("instructions");
+            instructionsField.setAccessible(true);
+            return (List<TransactionInstruction>) instructionsField.get(message);
+        } catch (NoSuchFieldException | IllegalAccessException e) {
+            throw new IllegalStateException("Unable to inspect transaction instructions", e);
+        }
+    }
+
+    private void ensureRecentBlockhash(Transaction transaction, Message message, RpcApi api) throws RpcException {
+        try {
+            Field blockhashField = Message.class.getDeclaredField("recentBlockhash");
+            blockhashField.setAccessible(true);
+            String recentBlockhash = (String) blockhashField.get(message);
+            if (recentBlockhash != null && !recentBlockhash.isBlank()) {
+                return;
+            }
+        } catch (NoSuchFieldException | IllegalAccessException e) {
+            throw new IllegalStateException("Unable to inspect recent blockhash", e);
+        }
+
+        LatestBlockhash latestBlockhash = api.getLatestBlockhash();
+        if (latestBlockhash == null || latestBlockhash.getValue() == null
+                || latestBlockhash.getValue().getBlockhash() == null
+                || latestBlockhash.getValue().getBlockhash().isBlank()) {
+            throw new IllegalStateException("Latest blockhash is unavailable");
+        }
+        transaction.setRecentBlockHash(latestBlockhash.getValue().getBlockhash());
+    }
+
+    private void ensureSerializedMessage(Transaction transaction, Message message) {
+        try {
+            Field serializedField = Transaction.class.getDeclaredField("serializedMessage");
+            serializedField.setAccessible(true);
+            if (serializedField.get(transaction) == null) {
+                serializedField.set(transaction, message.serialize());
+            }
+        } catch (NoSuchFieldException | IllegalAccessException e) {
+            throw new IllegalStateException("Unable to serialize transaction message", e);
+        }
+    }
+
+    private long extractComputeUnits(SimulatedTransaction simulatedTransaction) {
+        if (simulatedTransaction == null || simulatedTransaction.getValue() == null
+                || simulatedTransaction.getValue().getLogs() == null) {
+            throw new IllegalStateException("Simulation logs are unavailable");
+        }
+
+        Pattern pattern = Pattern.compile("consumed (\\d+) of (\\d+) compute units");
+        OptionalLong maxConsumed = simulatedTransaction.getValue().getLogs().stream()
+                .map(pattern::matcher)
+                .filter(Matcher::find)
+                .mapToLong(matcher -> Long.parseLong(matcher.group(1)))
+                .max();
+
+        return maxConsumed.orElseThrow(() -> new IllegalStateException("Simulation did not report compute usage"));
+    }
+
+    private long selectPrioritizationFee(List<RecentPrioritizationFees> prioritizationFees) {
+        if (prioritizationFees == null || prioritizationFees.isEmpty()) {
+            return 0L;
+        }
+        List<Long> fees = prioritizationFees.stream()
+                .map(RecentPrioritizationFees::getPrioritizationFee)
+                .sorted()
+                .toList();
+        int size = fees.size();
+        if (size % 2 == 1) {
+            return fees.get(size / 2);
+        }
+        long lower = fees.get(size / 2 - 1);
+        long upper = fees.get(size / 2);
+        return (lower + upper) / 2;
     }
 }
