@@ -10,6 +10,7 @@ import org.p2p.solanaj.core.PublicKey;
 import org.p2p.solanaj.core.Transaction;
 import org.p2p.solanaj.core.TransactionInstruction;
 import org.p2p.solanaj.programs.AssociatedTokenProgram;
+import org.p2p.solanaj.programs.ComputeBudgetProgram;
 import org.p2p.solanaj.programs.SystemProgram;
 import org.p2p.solanaj.programs.TokenProgram;
 import org.p2p.solanaj.rpc.RpcApi;
@@ -150,6 +151,7 @@ public class SolanajWalletService implements SolanaWalletService {
 
         try {
             RpcApi api = rpcClient.getApi();
+            addPrioritizationFeeInstruction(transaction, api);
             LOGGER.info(() -> "Submitting SOL transfer from " + fromAddress + " to " + toAddress
                     + " for " + amount + " SOL (" + lamports + " lamports).");
             return api.sendTransaction(transaction, sender);
@@ -232,6 +234,7 @@ public class SolanajWalletService implements SolanaWalletService {
             LOGGER.info(() -> "Submitting SPL token transfer from " + fromAddress + " to " + toAddress
                     + " for " + amount + " tokens (base units=" + baseUnits + ", decimals=" + decimals + ").");
 
+            addPrioritizationFeeInstruction(transaction, api);
             return api.sendTransaction(transaction, sender);
         } catch (RpcException e) {
             LOGGER.log(Level.SEVERE, "RPC token transfer call failed", e);
@@ -277,10 +280,7 @@ public class SolanajWalletService implements SolanaWalletService {
 
             ensureSerializedMessage(transaction, message);
             String serializedTransaction = Base64.getEncoder().encodeToString(transaction.serialize());
-            List<AccountMeta> accountMetas = message.getAccountKeys();
-            List<PublicKey> accountKeys = accountMetas == null
-                    ? List.of()
-                    : accountMetas.stream().map(AccountMeta::getPublicKey).toList();
+            List<PublicKey> accountKeys = extractAccountKeys(message);
 
             SimulatedTransaction simulatedTransaction = api.simulateTransaction(serializedTransaction, accountKeys);
             long computeUnits = extractComputeUnits(simulatedTransaction);
@@ -291,10 +291,7 @@ public class SolanajWalletService implements SolanaWalletService {
                 throw new IllegalStateException("Base fee is unavailable for the provided transaction message");
             }
 
-            List<RecentPrioritizationFees> prioritizationFees = accountKeys.isEmpty()
-                    ? api.getRecentPrioritizationFees()
-                    : api.getRecentPrioritizationFees(accountKeys);
-            long prioritizationFeeMicroLamports = selectPrioritizationFee(prioritizationFees);
+            long prioritizationFeeMicroLamports = fetchPrioritizationFeeMicroLamports(api, accountKeys);
 
             BigDecimal prioritizationLamports = BigDecimal.valueOf(prioritizationFeeMicroLamports)
                     .multiply(BigDecimal.valueOf(computeUnits))
@@ -465,6 +462,43 @@ public class SolanajWalletService implements SolanaWalletService {
         } catch (NoSuchFieldException | IllegalAccessException e) {
             throw new IllegalStateException("Unable to access transaction message", e);
         }
+    }
+
+    private List<PublicKey> extractAccountKeys(Message message) {
+        try {
+            List<AccountMeta> accountMetas = message.getAccountKeys();
+            if (accountMetas == null) {
+                return List.of();
+            }
+            return accountMetas.stream().map(AccountMeta::getPublicKey).toList();
+        } catch (NullPointerException e) {
+            return List.of();
+        }
+    }
+
+    private void addPrioritizationFeeInstruction(Transaction transaction, RpcApi api) throws RpcException {
+        Message message = extractMessage(transaction);
+        List<PublicKey> accountKeys = extractAccountKeys(message);
+        long prioritizationFeeMicroLamports = fetchPrioritizationFeeMicroLamports(api, accountKeys);
+        if (prioritizationFeeMicroLamports <= 0) {
+            return;
+        }
+        int feeMicroLamports = prioritizationFeeMicroLamports > Integer.MAX_VALUE
+                ? Integer.MAX_VALUE
+                : (int) prioritizationFeeMicroLamports;
+        TransactionInstruction instruction = ComputeBudgetProgram.setComputeUnitPrice(feeMicroLamports);
+        List<TransactionInstruction> instructions = extractInstructions(message);
+        if (instructions == null) {
+            throw new IllegalStateException("Transaction instructions are unavailable");
+        }
+        instructions.add(0, instruction);
+    }
+
+    private long fetchPrioritizationFeeMicroLamports(RpcApi api, List<PublicKey> accountKeys) throws RpcException {
+        List<RecentPrioritizationFees> prioritizationFees = accountKeys == null || accountKeys.isEmpty()
+                ? api.getRecentPrioritizationFees()
+                : api.getRecentPrioritizationFees(accountKeys);
+        return selectPrioritizationFee(prioritizationFees);
     }
 
     @SuppressWarnings("unchecked")
