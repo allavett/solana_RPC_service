@@ -48,6 +48,7 @@ public class SolanajWalletService implements SolanaWalletService {
     private static final BigDecimal LAMPORTS_PER_SOL = new BigDecimal("1000000000");
     private static final long MAX_PRIORITY_FEE_LAMPORTS = 5_000L;
     private static final long DEFAULT_COMPUTE_UNIT_LIMIT = 100_000L;
+    private static final long REQUIRED_FEE_PAYER_BALANCE_LAMPORTS = 10_000L;
     private static final int DEFAULT_ACCOUNT = 0;
     private static final int DEFAULT_CHANGE = 0;
 
@@ -55,6 +56,7 @@ public class SolanajWalletService implements SolanaWalletService {
     private final DerivationService derivationService;
     private final DerivedAccountRepository accountRepository;
     private final KeyStorage keyStorage;
+    private final DerivedAccount defaultFeePayer;
 
     public SolanajWalletService() {
         this(SolanaApplicationContext.getRpcClient(),
@@ -75,6 +77,23 @@ public class SolanajWalletService implements SolanaWalletService {
         this.derivationService = Objects.requireNonNull(derivationService, "derivationService must not be null");
         this.accountRepository = Objects.requireNonNull(accountRepository, "accountRepository must not be null");
         this.keyStorage = Objects.requireNonNull(keyStorage, "keyStorage must not be null");
+        this.defaultFeePayer = null;
+    }
+
+    public SolanajWalletService(RpcClient rpcClient, DerivationService derivationService,
+                                DerivedAccountRepository accountRepository, KeyStorage keyStorage,
+                                String defaultFeePayerAddress) {
+        this.rpcClient = Objects.requireNonNull(rpcClient, "rpcClient must not be null");
+        this.derivationService = Objects.requireNonNull(derivationService, "derivationService must not be null");
+        this.accountRepository = Objects.requireNonNull(accountRepository, "accountRepository must not be null");
+        this.keyStorage = Objects.requireNonNull(keyStorage, "keyStorage must not be null");
+        if (defaultFeePayerAddress == null || defaultFeePayerAddress.isBlank()) {
+            this.defaultFeePayer = null;
+        } else {
+            this.defaultFeePayer = accountRepository.findByPublicKey(defaultFeePayerAddress)
+                    .orElseThrow(() -> new IllegalArgumentException(
+                            "Default fee payer must exist in account repository: " + defaultFeePayerAddress));
+        }
     }
 
     @Override
@@ -142,10 +161,10 @@ public class SolanajWalletService implements SolanaWalletService {
 
         Account sender = resolveFeePayer(fromAddress);
 
-        Transaction transaction = createSolTransferTransaction(fromPublicKey, toPublicKey, lamports);
-
         try {
             RpcApi api = rpcClient.getApi();
+            ensureFeePayerBalance(sender, api);
+            Transaction transaction = createSolTransferTransaction(fromPublicKey, toPublicKey, lamports);
             addPrioritizationFeeInstruction(transaction, api, sender);
             LOGGER.info(() -> "Submitting SOL transfer from " + fromAddress + " to " + toAddress
                     + " for " + amount + " SOL (" + lamports + " lamports).");
@@ -194,6 +213,7 @@ public class SolanajWalletService implements SolanaWalletService {
 
         try {
             RpcApi api = rpcClient.getApi();
+            ensureFeePayerBalance(sender, api);
             TokenTransferPlan plan = buildTokenTransferPlan(fromPublicKey, toPublicKey, mintPublicKey, amount, api);
             Transaction transaction = plan.transaction();
 
@@ -593,12 +613,26 @@ public class SolanajWalletService implements SolanaWalletService {
     }
 
     private Account resolveFeePayer(String fromAddress) {
+        if (defaultFeePayer != null) {
+            return derivationService.derive(
+                    defaultFeePayer.getAccount(),
+                    defaultFeePayer.getChange(),
+                    defaultFeePayer.getIndex());
+        }
         DerivedAccount derivedAccount = accountRepository.findByPublicKey(fromAddress)
                 .orElseThrow(() -> new IllegalArgumentException("Unknown derived address: " + fromAddress));
         return derivationService.derive(
                 derivedAccount.getAccount(),
                 derivedAccount.getChange(),
                 derivedAccount.getIndex());
+    }
+
+    private void ensureFeePayerBalance(Account feePayer, RpcApi api) throws RpcException {
+        long balance = api.getBalance(feePayer.getPublicKey());
+        if (balance < REQUIRED_FEE_PAYER_BALANCE_LAMPORTS) {
+            throw new IllegalStateException("Fee payer must have at least "
+                    + REQUIRED_FEE_PAYER_BALANCE_LAMPORTS + " lamports to cover fees");
+        }
     }
 
     private Transaction buildSimulationTransaction(Message sourceMessage, Account feePayer, RpcApi api)
