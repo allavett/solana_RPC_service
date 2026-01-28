@@ -49,9 +49,10 @@ class SolanajWalletServiceTest {
     private RpcApi rpcApi;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws RpcException {
         MockitoAnnotations.openMocks(this);
         when(rpcClient.getApi()).thenReturn(rpcApi);
+        when(rpcApi.getBalance(any(PublicKey.class))).thenReturn(20_000L);
         derivationService = new DerivationService(TEST_MNEMONIC);
         accountRepository = new InMemoryDerivedAccountRepository();
         keyStorage = new InMemoryKeyStorage();
@@ -295,6 +296,17 @@ class SolanajWalletServiceTest {
     }
 
     @Test
+    void transferSolRejectsInsufficientFeePayerBalance() throws RpcException {
+        String sender = walletService.getNewAddress("sender");
+        when(rpcApi.getBalance(any(PublicKey.class))).thenReturn(9_000L);
+
+        assertThrows(IllegalStateException.class, () -> walletService.transferSol(
+                sender,
+                "11111111111111111111111111111111",
+                new BigDecimal("1")));
+    }
+
+    @Test
     void transferSolUsesDefaultFeePayerWhenConfigured() throws Exception {
         Account feePayerAccount = derivationService.derive(0, 0, 0);
         accountRepository.save(new DerivedAccount(
@@ -394,6 +406,21 @@ class SolanajWalletServiceTest {
 
         assertEquals("token-signature", signature);
         verify(rpcApi).sendTransaction(any(Transaction.class), any(Account.class));
+    }
+
+    @Test
+    void transferSolTokenRejectsInsufficientFeePayerBalance() throws RpcException {
+        String sender = walletService.getNewAddress("token-sender");
+        TokenResultObjects.TokenAmountInfo supplyInfo = org.mockito.Mockito.mock(TokenResultObjects.TokenAmountInfo.class);
+        when(supplyInfo.getDecimals()).thenReturn(6);
+        when(rpcApi.getTokenSupply(any(PublicKey.class))).thenReturn(supplyInfo);
+        when(rpcApi.getBalance(any(PublicKey.class))).thenReturn(9_000L);
+
+        assertThrows(IllegalStateException.class, () -> walletService.transferSolToken(
+                sender,
+                "11111111111111111111111111111111",
+                new BigDecimal("1.5"),
+                "So11111111111111111111111111111111111111112"));
     }
 
     @Test
