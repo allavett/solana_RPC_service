@@ -140,16 +140,9 @@ public class SolanajWalletService implements SolanaWalletService {
         PublicKey toPublicKey = parseRequiredPublicKey(toAddress, "Recipient");
         long lamports = validateAndConvertAmount(amount);
 
-        DerivedAccount derivedAccount = accountRepository.findByPublicKey(fromAddress)
-                .orElseThrow(() -> new IllegalArgumentException("Unknown derived address: " + fromAddress));
+        Account sender = resolveFeePayer(fromAddress);
 
-        Account sender = derivationService.derive(
-                derivedAccount.getAccount(),
-                derivedAccount.getChange(),
-                derivedAccount.getIndex());
-
-        Transaction transaction = new Transaction();
-        transaction.addInstruction(SystemProgram.transfer(fromPublicKey, toPublicKey, lamports));
+        Transaction transaction = createSolTransferTransaction(fromPublicKey, toPublicKey, lamports);
 
         try {
             RpcApi api = rpcClient.getApi();
@@ -197,44 +190,16 @@ public class SolanajWalletService implements SolanaWalletService {
         PublicKey toPublicKey = parseRequiredPublicKey(toAddress, "Recipient");
         PublicKey mintPublicKey = parseRequiredPublicKey(tokenAddress, "Token mint");
 
-        DerivedAccount derivedAccount = accountRepository.findByPublicKey(fromAddress)
-                .orElseThrow(() -> new IllegalArgumentException("Unknown derived address: " + fromAddress));
-
-        Account sender = derivationService.derive(
-                derivedAccount.getAccount(),
-                derivedAccount.getChange(),
-                derivedAccount.getIndex());
+        Account sender = resolveFeePayer(fromAddress);
 
         try {
             RpcApi api = rpcClient.getApi();
-            int decimals = fetchTokenDecimals(api, mintPublicKey);
-            long baseUnits = validateAndConvertTokenAmount(amount, decimals);
-
-            PublicKey senderTokenAccount = findAssociatedTokenAddress(fromPublicKey, mintPublicKey);
-            PublicKey recipientTokenAccount = findAssociatedTokenAddress(toPublicKey, mintPublicKey);
-
-            Transaction transaction = new Transaction();
-
-            if (!accountExists(api, senderTokenAccount)) {
-                transaction.addInstruction(AssociatedTokenProgram.createIdempotent(
-                        fromPublicKey, fromPublicKey, mintPublicKey));
-            }
-
-            if (!accountExists(api, recipientTokenAccount)) {
-                transaction.addInstruction(AssociatedTokenProgram.createIdempotent(
-                        fromPublicKey, toPublicKey, mintPublicKey));
-            }
-
-            transaction.addInstruction(TokenProgram.transferChecked(
-                    senderTokenAccount,
-                    recipientTokenAccount,
-                    baseUnits,
-                    (byte) decimals,
-                    fromPublicKey,
-                    mintPublicKey));
+            TokenTransferPlan plan = buildTokenTransferPlan(fromPublicKey, toPublicKey, mintPublicKey, amount, api);
+            Transaction transaction = plan.transaction();
 
             LOGGER.info(() -> "Submitting SPL token transfer from " + fromAddress + " to " + toAddress
-                    + " for " + amount + " tokens (base units=" + baseUnits + ", decimals=" + decimals + ").");
+                    + " for " + amount + " tokens (base units=" + plan.baseUnits()
+                    + ", decimals=" + plan.decimals() + ").");
 
             addPrioritizationFeeInstruction(transaction, api, sender);
             return api.sendTransaction(transaction, sender);
@@ -279,6 +244,11 @@ public class SolanajWalletService implements SolanaWalletService {
         try {
             RpcApi api = rpcClient.getApi();
             ensureRecentBlockhash(transaction, message, api);
+            Account feePayer = extractFeePayer(message);
+            if (feePayer == null) {
+                throw new IllegalStateException("Fee payer is required to estimate transaction fees");
+            }
+            transaction.sign(feePayer);
 
             ensureSerializedMessage(transaction, message);
             String serializedTransaction = Base64.getEncoder().encodeToString(transaction.serialize());
@@ -307,6 +277,50 @@ public class SolanajWalletService implements SolanaWalletService {
         } catch (RpcException e) {
             LOGGER.log(Level.SEVERE, "RPC getEstimatedTransactionFee call failed", e);
             throw new IllegalStateException("Failed to estimate transaction fee via Solana RPC", e);
+        }
+    }
+
+    public Transaction buildSolTransferTransaction(String fromAddress, String toAddress, BigDecimal amount) {
+        PublicKey fromPublicKey = parseRequiredPublicKey(fromAddress, "Sender");
+        PublicKey toPublicKey = parseRequiredPublicKey(toAddress, "Recipient");
+        long lamports = validateAndConvertAmount(amount);
+        Transaction transaction = createSolTransferTransaction(fromPublicKey, toPublicKey, lamports);
+        ensureFeePayer(extractMessage(transaction), resolveFeePayer(fromAddress));
+        return transaction;
+    }
+
+    public Transaction buildTokenTransferTransaction(String fromAddress, String toAddress, BigDecimal amount, String tokenAddress) {
+        PublicKey fromPublicKey = parseRequiredPublicKey(fromAddress, "Sender");
+        PublicKey toPublicKey = parseRequiredPublicKey(toAddress, "Recipient");
+        PublicKey mintPublicKey = parseRequiredPublicKey(tokenAddress, "Token mint");
+
+        try {
+            RpcApi api = rpcClient.getApi();
+            TokenTransferPlan plan = buildTokenTransferPlan(fromPublicKey, toPublicKey, mintPublicKey, amount, api);
+            Transaction transaction = plan.transaction();
+            ensureFeePayer(extractMessage(transaction), resolveFeePayer(fromAddress));
+            return transaction;
+        } catch (RpcException e) {
+            LOGGER.log(Level.SEVERE, "RPC token transfer build call failed", e);
+            throw new IllegalStateException("Failed to build SPL token transfer transaction", e);
+        }
+    }
+
+    public String sendPreparedTransaction(String fromAddress, Transaction transaction) {
+        if (transaction == null) {
+            throw new IllegalArgumentException("Transaction must not be null");
+        }
+
+        Account sender = resolveFeePayer(fromAddress);
+
+        try {
+            RpcApi api = rpcClient.getApi();
+            addPrioritizationFeeInstruction(transaction, api, sender);
+            LOGGER.info(() -> "Submitting prepared transaction from " + fromAddress + ".");
+            return api.sendTransaction(transaction, sender);
+        } catch (RpcException e) {
+            LOGGER.log(Level.SEVERE, "RPC sendPreparedTransaction call failed", e);
+            throw new IllegalStateException("Failed to send transaction via Solana RPC", e);
         }
     }
 
@@ -481,13 +495,24 @@ public class SolanajWalletService implements SolanaWalletService {
         }
     }
 
+    private Account extractFeePayer(Message message) {
+        try {
+            Field feePayerField = Message.class.getDeclaredField("feePayer");
+            feePayerField.setAccessible(true);
+            return (Account) feePayerField.get(message);
+        } catch (NoSuchFieldException | IllegalAccessException e) {
+            throw new IllegalStateException("Unable to access fee payer on transaction message", e);
+        }
+    }
+
     private void addPrioritizationFeeInstruction(Transaction transaction, RpcApi api, Account feePayer) throws RpcException {
         Message message = extractMessage(transaction);
         ensureFeePayer(message, feePayer);
         ensureRecentBlockhash(transaction, message, api);
-        ensureSerializedMessage(transaction, message);
-        String serializedTransaction = Base64.getEncoder().encodeToString(transaction.serialize());
-        List<PublicKey> accountKeys = extractAccountKeys(message);
+        Transaction simulation = buildSimulationTransaction(message, feePayer, api);
+        Message simulationMessage = extractMessage(simulation);
+        String serializedTransaction = Base64.getEncoder().encodeToString(simulation.serialize());
+        List<PublicKey> accountKeys = extractAccountKeys(simulationMessage);
         SimulatedTransaction simulatedTransaction = api.simulateTransaction(serializedTransaction, accountKeys);
         long computeUnits = extractComputeUnits(simulatedTransaction);
         long prioritizationFeeMicroLamports = fetchPrioritizationFeeMicroLamports(api, accountKeys);
@@ -499,21 +524,100 @@ public class SolanajWalletService implements SolanaWalletService {
         int computeUnitLimit = resolvedComputeUnitLimit > Integer.MAX_VALUE
                 ? (int) DEFAULT_COMPUTE_UNIT_LIMIT
                 : (int) resolvedComputeUnitLimit;
-        instructions.add(0, ComputeBudgetProgram.setComputeUnitLimit(computeUnitLimit));
+        TransactionInstruction computeUnitLimitInstruction = ComputeBudgetProgram.setComputeUnitLimit(computeUnitLimit);
+        message.addInstruction(computeUnitLimitInstruction);
         if (prioritizationFeeMicroLamports <= 0) {
+            instructions.remove(computeUnitLimitInstruction);
+            instructions.add(0, computeUnitLimitInstruction);
             return;
         }
         long maxMicroLamports = computeUnits == 0
                 ? 0
                 : (MAX_PRIORITY_FEE_LAMPORTS * 1_000_000L) / computeUnits;
         if (maxMicroLamports <= 0) {
+            instructions.remove(computeUnitLimitInstruction);
+            instructions.add(0, computeUnitLimitInstruction);
             return;
         }
         long boundedFeeMicroLamports = Math.min(prioritizationFeeMicroLamports, maxMicroLamports);
         int feeMicroLamports = boundedFeeMicroLamports > Integer.MAX_VALUE
                 ? Integer.MAX_VALUE
                 : (int) boundedFeeMicroLamports;
-        instructions.add(1, ComputeBudgetProgram.setComputeUnitPrice(feeMicroLamports));
+        TransactionInstruction computeUnitPriceInstruction = ComputeBudgetProgram.setComputeUnitPrice(feeMicroLamports);
+        message.addInstruction(computeUnitPriceInstruction);
+        instructions.remove(computeUnitLimitInstruction);
+        instructions.remove(computeUnitPriceInstruction);
+        instructions.add(0, computeUnitLimitInstruction);
+        instructions.add(1, computeUnitPriceInstruction);
+    }
+
+    private Transaction createSolTransferTransaction(PublicKey fromPublicKey, PublicKey toPublicKey, long lamports) {
+        Transaction transaction = new Transaction();
+        transaction.addInstruction(SystemProgram.transfer(fromPublicKey, toPublicKey, lamports));
+        return transaction;
+    }
+
+    private TokenTransferPlan buildTokenTransferPlan(PublicKey fromPublicKey, PublicKey toPublicKey,
+                                                     PublicKey mintPublicKey, BigDecimal amount, RpcApi api)
+            throws RpcException {
+        int decimals = fetchTokenDecimals(api, mintPublicKey);
+        long baseUnits = validateAndConvertTokenAmount(amount, decimals);
+
+        PublicKey senderTokenAccount = findAssociatedTokenAddress(fromPublicKey, mintPublicKey);
+        PublicKey recipientTokenAccount = findAssociatedTokenAddress(toPublicKey, mintPublicKey);
+
+        Transaction transaction = new Transaction();
+
+        if (!accountExists(api, senderTokenAccount)) {
+            transaction.addInstruction(AssociatedTokenProgram.createIdempotent(
+                    fromPublicKey, fromPublicKey, mintPublicKey));
+        }
+
+        if (!accountExists(api, recipientTokenAccount)) {
+            transaction.addInstruction(AssociatedTokenProgram.createIdempotent(
+                    fromPublicKey, toPublicKey, mintPublicKey));
+        }
+
+        transaction.addInstruction(TokenProgram.transferChecked(
+                senderTokenAccount,
+                recipientTokenAccount,
+                baseUnits,
+                (byte) decimals,
+                fromPublicKey,
+                mintPublicKey));
+
+        return new TokenTransferPlan(transaction, baseUnits, decimals);
+    }
+
+    private record TokenTransferPlan(Transaction transaction, long baseUnits, int decimals) {
+    }
+
+    private Account resolveFeePayer(String fromAddress) {
+        DerivedAccount derivedAccount = accountRepository.findByPublicKey(fromAddress)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown derived address: " + fromAddress));
+        return derivationService.derive(
+                derivedAccount.getAccount(),
+                derivedAccount.getChange(),
+                derivedAccount.getIndex());
+    }
+
+    private Transaction buildSimulationTransaction(Message sourceMessage, Account feePayer, RpcApi api)
+            throws RpcException {
+        List<TransactionInstruction> sourceInstructions = extractInstructions(sourceMessage);
+        if (sourceInstructions == null || sourceInstructions.isEmpty()) {
+            throw new IllegalStateException("Simulation requires at least one instruction");
+        }
+
+        Transaction simulation = new Transaction();
+        for (TransactionInstruction instruction : sourceInstructions) {
+            simulation.addInstruction(instruction);
+        }
+        Message simulationMessage = extractMessage(simulation);
+        ensureFeePayer(simulationMessage, feePayer);
+        ensureRecentBlockhash(simulation, simulationMessage, api);
+        simulation.sign(feePayer);
+        ensureSerializedMessage(simulation, simulationMessage);
+        return simulation;
     }
 
     private long fetchPrioritizationFeeMicroLamports(RpcApi api, List<PublicKey> accountKeys) throws RpcException {
@@ -585,7 +689,7 @@ public class SolanajWalletService implements SolanaWalletService {
     private long extractComputeUnits(SimulatedTransaction simulatedTransaction) {
         if (simulatedTransaction == null || simulatedTransaction.getValue() == null
                 || simulatedTransaction.getValue().getLogs() == null) {
-            throw new IllegalStateException("Simulation logs are unavailable");
+            return DEFAULT_COMPUTE_UNIT_LIMIT;
         }
 
         Pattern pattern = Pattern.compile("consumed (\\d+) of (\\d+) compute units");
@@ -595,7 +699,7 @@ public class SolanajWalletService implements SolanaWalletService {
                 .mapToLong(matcher -> Long.parseLong(matcher.group(1)))
                 .max();
 
-        return maxConsumed.orElseThrow(() -> new IllegalStateException("Simulation did not report compute usage"));
+        return maxConsumed.orElse(DEFAULT_COMPUTE_UNIT_LIMIT);
     }
 
     private long selectPrioritizationFee(List<RecentPrioritizationFees> prioritizationFees) {

@@ -2,11 +2,12 @@ package com.solana.rpc;
 
 import com.solana.rpc.config.SolanaApplicationContext;
 import com.solana.rpc.model.DerivedAccount;
-import com.solana.rpc.service.SolanaWalletService;
 import com.solana.rpc.service.SolanajWalletService;
+import org.p2p.solanaj.core.Transaction;
 
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -30,7 +31,7 @@ import java.util.stream.Collectors;
     public static void main(String[] args) {
         configureProxyFromEnv();
 
-        SolanaWalletService walletService = new SolanajWalletService();
+        SolanajWalletService walletService = new SolanajWalletService();
 
         printNetworkDiagnostics();
 
@@ -54,8 +55,15 @@ import java.util.stream.Collectors;
         if (balance.compareTo(transferAmount) >= 0) {
             System.out.println("\nSubmitting transfer of " + transferAmount.stripTrailingZeros().toPlainString()
                     + " SOL from " + label + " to demoTransaction...");
-            String signature = walletService.transferSol(address, transactionRecipient, transferAmount);
+            Transaction solEstimate = walletService.buildSolTransferTransaction(address, transactionRecipient, transferAmount);
+            BigDecimal estimatedSolFee = walletService.getEstimatedTransactionFee(solEstimate);
+            System.out.println("Estimated SOL transfer fee: " + formatSol(estimatedSolFee));
+            Transaction solTransfer = walletService.buildSolTransferTransaction(address, transactionRecipient, transferAmount);
+            String signature = walletService.sendPreparedTransaction(address, solTransfer);
             System.out.println("Transfer signature: " + signature);
+            waitForTransactionCompletion("SOL transfer");
+            BigDecimal actualSolFee = getTransactionFeeWithRetry(walletService, signature, "SOL transfer");
+            printFeeComparison("SOL transfer", estimatedSolFee, actualSolFee);
         } else {
             System.out.println("\nSkipping transfer; insufficient balance to send "
                     + transferAmount.stripTrailingZeros().toPlainString() + " SOL.");
@@ -65,8 +73,17 @@ import java.util.stream.Collectors;
         BigDecimal dummyTokenAmount = new BigDecimal("1.23");
         System.out.println("\nSubmitting SPL token transfer of " + dummyTokenAmount.stripTrailingZeros().toPlainString()
                 + " DUMMY tokens from " + label + " to demoTransaction...");
-        String tokenSignature = walletService.transferSolToken(address, transactionRecipient, dummyTokenAmount, dummyTokenMint);
+        Transaction tokenEstimate = walletService.buildTokenTransferTransaction(
+                address, transactionRecipient, dummyTokenAmount, dummyTokenMint);
+        BigDecimal estimatedTokenFee = walletService.getEstimatedTransactionFee(tokenEstimate);
+        System.out.println("Estimated SPL token transfer fee: " + formatSol(estimatedTokenFee));
+        Transaction tokenTransfer = walletService.buildTokenTransferTransaction(
+                address, transactionRecipient, dummyTokenAmount, dummyTokenMint);
+        String tokenSignature = walletService.sendPreparedTransaction(address, tokenTransfer);
         System.out.println("Token transfer signature: " + tokenSignature);
+        waitForTransactionCompletion("SPL token transfer");
+        BigDecimal actualTokenFee = getTransactionFeeWithRetry(walletService, tokenSignature, "SPL token transfer");
+        printFeeComparison("SPL token transfer", estimatedTokenFee, actualTokenFee);
 
         List<DerivedAccount> accounts = walletService.listAccounts();
         System.out.println("\nDerived accounts held in memory:");
@@ -212,6 +229,55 @@ import java.util.stream.Collectors;
             System.err.println("Health probe interrupted: " + e.getMessage());
         } catch (IOException e) {
             System.err.println("Health probe failed: " + e.getMessage());
+        }
+    }
+
+    private static void waitForTransactionCompletion(String label) {
+        Duration waitDuration = Duration.ofSeconds(20);
+        System.out.println("Waiting " + waitDuration.getSeconds() + "s for " + label + " confirmation...");
+        sleep(waitDuration, "waiting for " + label + " confirmation");
+    }
+
+    private static void printFeeComparison(String label, BigDecimal estimatedFee, BigDecimal actualFee) {
+        BigDecimal delta = actualFee.subtract(estimatedFee).setScale(9, RoundingMode.HALF_UP);
+        System.out.println(label + " fee estimate: " + formatSol(estimatedFee)
+                + " | actual: " + formatSol(actualFee)
+                + " | delta: " + formatSol(delta));
+    }
+
+    private static String formatSol(BigDecimal value) {
+        if (value == null) {
+            return "n/a";
+        }
+        return value.stripTrailingZeros().toPlainString() + " SOL";
+    }
+
+    private static BigDecimal getTransactionFeeWithRetry(SolanajWalletService walletService,
+                                                         String signature,
+                                                         String label) {
+        Duration retryDelay = Duration.ofSeconds(10);
+        int maxAttempts = 3;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                return walletService.getTransactionFee(signature);
+            } catch (IllegalStateException e) {
+                if (attempt == maxAttempts) {
+                    throw e;
+                }
+                System.out.println("Transaction metadata unavailable for " + label
+                        + " (attempt " + attempt + "). Retrying in " + retryDelay.getSeconds() + "s...");
+                sleep(retryDelay, "retrying " + label + " fee lookup");
+            }
+        }
+        throw new IllegalStateException("Unable to fetch transaction fee for " + label);
+    }
+
+    private static void sleep(Duration duration, String label) {
+        try {
+            Thread.sleep(duration.toMillis());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            System.err.println("Interrupted while " + label + ".");
         }
     }
 }
