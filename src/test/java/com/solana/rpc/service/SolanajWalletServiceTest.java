@@ -295,6 +295,45 @@ class SolanajWalletServiceTest {
     }
 
     @Test
+    void transferSolUsesDefaultFeePayerWhenConfigured() throws Exception {
+        Account feePayerAccount = derivationService.derive(0, 0, 0);
+        accountRepository.save(new DerivedAccount(
+                "fee-payer",
+                0,
+                0,
+                0,
+                feePayerAccount.getPublicKey().toBase58()));
+        keyStorage.save(feePayerAccount);
+
+        SolanajWalletService feePayerService = new SolanajWalletService(
+                rpcClient,
+                derivationService,
+                accountRepository,
+                keyStorage,
+                feePayerAccount.getPublicKey().toBase58());
+
+        String sender = feePayerService.getNewAddress("sender");
+        stubComputeBudgetSimulation();
+        when(rpcApi.sendTransaction(any(Transaction.class), any(Account.class))).thenReturn("signature");
+
+        feePayerService.transferSol(sender, "11111111111111111111111111111111", new BigDecimal("1.5"));
+
+        org.mockito.ArgumentCaptor<Account> accountCaptor = org.mockito.ArgumentCaptor.forClass(Account.class);
+        verify(rpcApi).sendTransaction(any(Transaction.class), accountCaptor.capture());
+        assertEquals(feePayerAccount.getPublicKey(), accountCaptor.getValue().getPublicKey());
+    }
+
+    @Test
+    void constructorRejectsMissingDefaultFeePayer() {
+        assertThrows(IllegalArgumentException.class, () -> new SolanajWalletService(
+                rpcClient,
+                derivationService,
+                accountRepository,
+                keyStorage,
+                "11111111111111111111111111111111"));
+    }
+
+    @Test
     void transferSolRejectsUnknownSender() {
         assertThrows(IllegalArgumentException.class, () -> walletService.transferSol(
                 "11111111111111111111111111111111",
