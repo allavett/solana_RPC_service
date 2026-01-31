@@ -1,5 +1,9 @@
 .gradle/
+gradle/
 build/
+
+gradlew.bat
+gradlew
 
 # IntelliJ/VS Code
 .idea/
