@@ -1,10 +1,10 @@
 package com.solana.rpc.wallet;
 
 import org.p2p.solanaj.core.Account;
+import org.p2p.solanaj.utils.TweetNaclFast;
 import org.p2p.solanaj.utils.bip32.wallet.HdAddress;
 import org.p2p.solanaj.utils.bip32.wallet.HdKeyGenerator;
 import org.p2p.solanaj.utils.bip32.wallet.SolanaCoin;
-import org.p2p.solanaj.utils.TweetNaclFast;
 
 import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.PBEKeySpec;
@@ -16,12 +16,13 @@ import java.util.Objects;
 
 /**
  * Utility for deriving Solana keypairs from a BIP39 mnemonic using the standard
- * m/44'/501'/account'/change'/index path structure.
+ * m/44'/501'/account'/index' path structure.
  */
 public class DerivationService {
 
     private static final int PBKDF2_ITERATIONS = 2048;
     private static final int PBKDF2_KEY_LENGTH = 512;
+    private static final int INDEX = 0;
 
     private final List<String> mnemonicWords;
     private final String passphrase;
@@ -64,16 +65,14 @@ public class DerivationService {
     }
 
     /**
-     * Derive a Solana keypair for the given account/change/index tuple using the
-     * m/44'/501'/account'/change'/index path.
+     * Derive a Solana keypair for the given account/index tuple using the
+     * m/44'/501'/account'/index' path.
      *
      * @param account account index (hardened); must be zero or positive
-     * @param change  change level (hardened); must be zero or positive
-     * @param index   address index (hardened); must be zero or positive
      * @return derived Solana account
      */
-    public Account derive(int account, int change, int index) {
-        if (account < 0 || change < 0 || index < 0) {
+    public Account derive(int account) {
+        if (account < 0) {
             throw new IllegalArgumentException("Derivation path components must not be negative");
         }
 
@@ -83,8 +82,7 @@ public class DerivationService {
         HdAddress purpose = hdKeyGenerator.getAddress(master, solanaCoin.getPurpose(), solanaCoin.getAlwaysHardened());
         HdAddress coinType = hdKeyGenerator.getAddress(purpose, solanaCoin.getCoinType(), solanaCoin.getAlwaysHardened());
         HdAddress accountNode = hdKeyGenerator.getAddress(coinType, account, solanaCoin.getAlwaysHardened());
-        HdAddress changeNode = hdKeyGenerator.getAddress(accountNode, change, solanaCoin.getAlwaysHardened());
-        HdAddress indexNode = hdKeyGenerator.getAddress(changeNode, index, solanaCoin.getAlwaysHardened());
+        HdAddress indexNode = hdKeyGenerator.getAddress(accountNode, INDEX, solanaCoin.getAlwaysHardened());
 
         byte[] seed32 = indexNode.getPrivateKey().getPrivateKey();
         TweetNaclFast.Signature.KeyPair keyPair = TweetNaclFast.Signature.keyPair_fromSeed(seed32);
@@ -95,12 +93,11 @@ public class DerivationService {
      * Derive the base58-encoded public key for the given account/change/index tuple.
      *
      * @param account account index (hardened); must be zero or positive
-     * @param change  change level (hardened); must be zero or positive
      * @param index   address index (hardened); must be zero or positive
      * @return base58-encoded public key string
      */
-    public String derivePublicKeyBase58(int account, int change, int index) {
-        return derive(account, change, index).getPublicKey().toBase58();
+    public String derivePublicKeyBase58(int account, int index) {
+        return derive(account).getPublicKey().toBase58();
     }
 
     private static byte[] mnemonicToSeed(List<String> words, String passphrase) {

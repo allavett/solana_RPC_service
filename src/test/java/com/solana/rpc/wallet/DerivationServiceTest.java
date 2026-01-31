@@ -1,7 +1,9 @@
 package com.solana.rpc.wallet;
 
 import org.junit.jupiter.api.Test;
-import static org.junit.jupiter.api.Assertions.*;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class DerivationServiceTest {
 
@@ -11,20 +13,18 @@ class DerivationServiceTest {
     void derivesExpectedPublicKeys() {
         DerivationService service = new DerivationService(TEST_MNEMONIC);
 
-        String first = service.derivePublicKeyBase58(0, 0, 0);
-        String second = service.derivePublicKeyBase58(0, 0, 1);
+        String first = service.derivePublicKeyBase58(0, 0);
+        String second = service.derivePublicKeyBase58(1, 0);
 
-        assertEquals("2bahaF9qfc6pE5DJCKQ7AcZF1nXx5Jvf4NwkQib8uwbL", first);
-        assertEquals("9LCBeEKbr17HV3Us8cWR7JrnNP6tLK6QDFtMv8RevjP1", second);
+        assertEquals("FfCEC4bh9hCuo2nANx7n8MVSumz7YqxT21sJ92YcTprg", first);
+        assertEquals("7SntRv1bwxMwV5za2b1HTN5fjMJdX6qSLugg8L8FdDjY", second);
     }
 
     @Test
     void rejectsNegativePathValues() {
         DerivationService service = new DerivationService(TEST_MNEMONIC);
 
-        assertThrows(IllegalArgumentException.class, () -> service.derive(-1, 0, 0));
-        assertThrows(IllegalArgumentException.class, () -> service.derive(0, -1, 0));
-        assertThrows(IllegalArgumentException.class, () -> service.derive(0, 0, -1));
+        assertThrows(IllegalArgumentException.class, () -> service.derive(-1));
     }
 
     @Test
@@ -32,8 +32,8 @@ class DerivationServiceTest {
         DerivationService firstInstance = new DerivationService(TEST_MNEMONIC);
         DerivationService secondInstance = new DerivationService(TEST_MNEMONIC);
 
-        String firstDerived = firstInstance.derivePublicKeyBase58(0, 0, 5);
-        String secondDerived = secondInstance.derivePublicKeyBase58(0, 0, 5);
+        String firstDerived = firstInstance.derivePublicKeyBase58(5, 0);
+        String secondDerived = secondInstance.derivePublicKeyBase58(5, 0);
 
         assertEquals(firstDerived, secondDerived);
     }

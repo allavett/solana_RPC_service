@@ -13,23 +13,16 @@ import org.p2p.solanaj.programs.SystemProgram;
 import org.p2p.solanaj.rpc.RpcApi;
 import org.p2p.solanaj.rpc.RpcClient;
 import org.p2p.solanaj.rpc.RpcException;
-import org.p2p.solanaj.rpc.types.ConfirmedTransaction;
-import org.p2p.solanaj.rpc.types.AccountInfo;
-import org.p2p.solanaj.rpc.types.LatestBlockhash;
-import org.p2p.solanaj.rpc.types.RecentPrioritizationFees;
-import org.p2p.solanaj.rpc.types.SimulatedTransaction;
-import org.p2p.solanaj.rpc.types.TokenAccountInfo;
-import org.p2p.solanaj.rpc.types.TokenResultObjects;
+import org.p2p.solanaj.rpc.types.*;
 
 import java.lang.reflect.Field;
 import java.math.BigDecimal;
-import java.util.Map;
 import java.util.List;
+import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyMap;
-import static org.mockito.ArgumentMatchers.anyList;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -64,14 +57,14 @@ class SolanajWalletServiceTest {
         String first = walletService.getNewAddress("primary");
         String second = walletService.getNewAddress("secondary");
 
-        assertEquals("2bahaF9qfc6pE5DJCKQ7AcZF1nXx5Jvf4NwkQib8uwbL", first);
-        assertEquals("9LCBeEKbr17HV3Us8cWR7JrnNP6tLK6QDFtMv8RevjP1", second);
+        assertEquals("FfCEC4bh9hCuo2nANx7n8MVSumz7YqxT21sJ92YcTprg", first);
+        assertEquals("7SntRv1bwxMwV5za2b1HTN5fjMJdX6qSLugg8L8FdDjY", second);
 
         DerivedAccount primary = accountRepository.findByLabel("primary").orElseThrow();
         DerivedAccount secondary = accountRepository.findByLabel("secondary").orElseThrow();
 
-        assertEquals(0, primary.getIndex());
-        assertEquals(1, secondary.getIndex());
+        assertEquals(0, primary.getAccount());
+        assertEquals(1, secondary.getAccount());
 
         List<DerivedAccount> accounts = walletService.listAccounts();
         assertEquals(2, accounts.size());
@@ -84,7 +77,7 @@ class SolanajWalletServiceTest {
 
         DerivedAccount account = accountRepository.findByLabel("account-0").orElseThrow();
         assertEquals(address, account.getPublicKey());
-        assertEquals(0, account.getIndex());
+        assertEquals(0, account.getAccount());
         assertEquals(1, keyStorage.getAccounts().size());
     }
 
@@ -308,11 +301,9 @@ class SolanajWalletServiceTest {
 
     @Test
     void transferSolUsesDefaultFeePayerWhenConfigured() throws Exception {
-        Account feePayerAccount = derivationService.derive(0, 0, 0);
+        Account feePayerAccount = derivationService.derive(0);
         accountRepository.save(new DerivedAccount(
                 "fee-payer",
-                0,
-                0,
                 0,
                 feePayerAccount.getPublicKey().toBase58()));
         keyStorage.save(feePayerAccount);

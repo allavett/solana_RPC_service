@@ -3,12 +3,7 @@ package com.solana.rpc.service;
 import com.solana.rpc.config.SolanaApplicationContext;
 import com.solana.rpc.model.DerivedAccount;
 import com.solana.rpc.wallet.DerivationService;
-import org.p2p.solanaj.core.Account;
-import org.p2p.solanaj.core.AccountMeta;
-import org.p2p.solanaj.core.Message;
-import org.p2p.solanaj.core.PublicKey;
-import org.p2p.solanaj.core.Transaction;
-import org.p2p.solanaj.core.TransactionInstruction;
+import org.p2p.solanaj.core.*;
 import org.p2p.solanaj.programs.AssociatedTokenProgram;
 import org.p2p.solanaj.programs.ComputeBudgetProgram;
 import org.p2p.solanaj.programs.SystemProgram;
@@ -16,28 +11,17 @@ import org.p2p.solanaj.programs.TokenProgram;
 import org.p2p.solanaj.rpc.RpcApi;
 import org.p2p.solanaj.rpc.RpcClient;
 import org.p2p.solanaj.rpc.RpcException;
-import org.p2p.solanaj.rpc.types.ConfirmedTransaction;
-import org.p2p.solanaj.rpc.types.AccountInfo;
-import org.p2p.solanaj.rpc.types.LatestBlockhash;
-import org.p2p.solanaj.rpc.types.RecentPrioritizationFees;
-import org.p2p.solanaj.rpc.types.SimulatedTransaction;
-import org.p2p.solanaj.rpc.types.TokenAccountInfo;
-import org.p2p.solanaj.rpc.types.TokenResultObjects;
+import org.p2p.solanaj.rpc.types.*;
 import org.p2p.solanaj.utils.Base58;
 
 import java.lang.reflect.Field;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.util.Base64;
-import java.util.List;
-import java.util.Collections;
-import java.util.Map;
-import java.util.Objects;
-import java.util.OptionalLong;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.*;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Default implementation of {@link SolanaWalletService} backed by the Solanaj RPC client and deterministic key derivation.
@@ -49,7 +33,7 @@ public class SolanajWalletService implements SolanaWalletService {
     private static final long MAX_PRIORITY_FEE_LAMPORTS = 5_000L;
     private static final long DEFAULT_COMPUTE_UNIT_LIMIT = 100_000L;
     private static final long REQUIRED_FEE_PAYER_BALANCE_LAMPORTS = 10_000L;
-    private static final int DEFAULT_ACCOUNT = 0;
+    private static final int DEFAULT_ACCOUNT = 1;
     private static final int DEFAULT_CHANGE = 0;
 
     private final RpcClient rpcClient;
@@ -103,7 +87,7 @@ public class SolanajWalletService implements SolanaWalletService {
 
     @Override
     public String getNewAddress() {
-        int nextIndex = determineNextIndex();
+        int nextIndex = determineNextAccountIndex();
         String autoLabel = "account-" + nextIndex;
         return createAndPersistAddress(autoLabel, nextIndex);
     }
@@ -115,7 +99,7 @@ public class SolanajWalletService implements SolanaWalletService {
             throw new IllegalArgumentException("Label already exists: " + label);
         }
 
-        int nextIndex = determineNextIndex();
+        int nextIndex = determineNextAccountIndex();
         return createAndPersistAddress(label, nextIndex);
     }
 
@@ -470,20 +454,19 @@ public class SolanajWalletService implements SolanaWalletService {
         return PublicKey.findProgramAddress(seeds, AssociatedTokenProgram.PROGRAM_ID).getAddress();
     }
 
-    private int determineNextIndex() {
+    private int determineNextAccountIndex() {
         return accountRepository.findAll().stream()
-                .filter(account -> account.getAccount() == DEFAULT_ACCOUNT && account.getChange() == DEFAULT_CHANGE)
-                .mapToInt(DerivedAccount::getIndex)
+                .mapToInt(DerivedAccount::getAccount)
                 .max()
                 .orElse(-1) + 1;
     }
 
     private String createAndPersistAddress(String label, int index) {
-        Account derivedAccount = derivationService.derive(DEFAULT_ACCOUNT, DEFAULT_CHANGE, index);
+        Account derivedAccount = derivationService.derive(index);
         keyStorage.save(derivedAccount);
         String publicKey = derivedAccount.getPublicKey().toBase58();
 
-        DerivedAccount metadata = new DerivedAccount(label, DEFAULT_ACCOUNT, DEFAULT_CHANGE, index, publicKey);
+        DerivedAccount metadata = new DerivedAccount(label, index, publicKey);
         accountRepository.save(metadata);
 
         return publicKey;
@@ -615,16 +598,14 @@ public class SolanajWalletService implements SolanaWalletService {
     private Account resolveFeePayer(String fromAddress) {
         if (defaultFeePayer != null) {
             return derivationService.derive(
-                    defaultFeePayer.getAccount(),
-                    defaultFeePayer.getChange(),
-                    defaultFeePayer.getIndex());
+                    defaultFeePayer.getAccount()
+            );
         }
         DerivedAccount derivedAccount = accountRepository.findByPublicKey(fromAddress)
                 .orElseThrow(() -> new IllegalArgumentException("Unknown derived address: " + fromAddress));
         return derivationService.derive(
-                derivedAccount.getAccount(),
-                derivedAccount.getChange(),
-                derivedAccount.getIndex());
+                derivedAccount.getAccount()
+        );
     }
 
     private void ensureFeePayerBalance(Account feePayer, RpcApi api) throws RpcException {

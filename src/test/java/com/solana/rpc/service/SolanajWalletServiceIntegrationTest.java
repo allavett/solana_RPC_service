@@ -15,11 +15,10 @@ import org.p2p.solanaj.rpc.RpcException;
 import java.math.BigDecimal;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 class SolanajWalletServiceIntegrationTest {
 
@@ -56,9 +55,9 @@ class SolanajWalletServiceIntegrationTest {
         DerivedAccount second = repository.findByLabel("second").orElseThrow();
         DerivedAccount third = repository.findByPublicKey(thirdPubKey).orElseThrow();
 
-        assertEquals(0, first.getIndex());
-        assertEquals(1, second.getIndex());
-        assertEquals(2, third.getIndex());
+        assertEquals(0, first.getAccount());
+        assertEquals(1, second.getAccount());
+        assertEquals(2, third.getAccount());
         assertEquals(firstPubKey, first.getPublicKey());
         assertEquals(secondPubKey, second.getPublicKey());
         assertEquals(thirdPubKey, third.getPublicKey());

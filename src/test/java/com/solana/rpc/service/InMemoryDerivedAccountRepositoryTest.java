@@ -6,7 +6,8 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Optional;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class InMemoryDerivedAccountRepositoryTest {
 
@@ -19,7 +20,7 @@ class InMemoryDerivedAccountRepositoryTest {
 
     @Test
     void savesAndFindsByLabelAndPublicKey() {
-        DerivedAccount account = new DerivedAccount("first", 0, 0, 0, "pubKey1");
+        DerivedAccount account = new DerivedAccount("first", 0, "pubKey1");
 
         repository.save(account);
 
@@ -29,7 +30,7 @@ class InMemoryDerivedAccountRepositoryTest {
 
     @Test
     void deletesByEitherKey() {
-        DerivedAccount account = new DerivedAccount("first", 0, 0, 0, "pubKey1");
+        DerivedAccount account = new DerivedAccount("first", 0, "pubKey1");
         repository.save(account);
 
         assertTrue(repository.deleteByPublicKey("pubKey1"));
@@ -43,13 +44,13 @@ class InMemoryDerivedAccountRepositoryTest {
 
     @Test
     void findByPublicKeyDelegatesToLabelMapping() {
-        DerivedAccount account = new DerivedAccount("primary", 0, 0, 1, "pubKey2");
+        DerivedAccount account = new DerivedAccount("primary", 1, "pubKey2");
         repository.save(account);
 
         Optional<DerivedAccount> lookup = repository.findByPublicKey("pubKey2");
 
         assertTrue(lookup.isPresent());
         assertEquals("primary", lookup.get().getLabel());
-        assertEquals(1, lookup.get().getIndex());
+        assertEquals(1, lookup.get().getAccount());
     }
 }
